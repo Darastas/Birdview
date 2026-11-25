@@ -1,6 +1,8 @@
 package appui
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -512,4 +514,119 @@ func TestFieldCommentUnescapeAndColorSwatch(t *testing.T) {
 	if img := tt.Image(); img.Bounds().Dx() != 402 {
 		t.Fatalf("unexpected checklist comment swatch render bounds: %v", img.Bounds())
 	}
+}
+
+func TestExploreImmediateSkeletonAndConditionalScrim(t *testing.T) {
+	blockCh := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-blockCh:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(blockCh)
+
+	app := newTestAppState(t)
+	app.client.INatBaseURL = srv.URL
+	app.client.EBirdBaseURL = srv.URL
+	_ = app.store.SaveEbirdKey("dummy-ebird-key")
+
+	// 预填旧地区缓存（模拟北京旧数据）
+	app.regFieldPhotos = []model.FieldPhotoObs{
+		{
+			ID:         1001,
+			ComName:    "老北京现场鸟",
+			SciName:    "Cyanopica cyanus",
+			Observer:   "OldObs",
+			PlaceGuess: "北京",
+			Photos:     []model.MediaPhoto{{URL: srv.URL + "/p1.jpg", ThumbURL: srv.URL + "/t1.jpg"}},
+		},
+	}
+	app.regObsList = []model.Observation{
+		{SpeciesCode: "hoopoe", ComName: "旧地区戴胜", LocName: "奥森", ObsDt: "2026-11-25 08:00", HowMany: 1, SubID: "S_OLD"},
+	}
+	app.regStat = &model.RegionStat{NumChecklists: 10, NumSpecies: 20, NumContributors: 5}
+	app.hsAll = []model.Hotspot{{LocID: "L_OLD", LocName: "旧地区热点", NumSpeciesAllTime: 99}}
+	app.hsFiltered = append([]model.Hotspot(nil), app.hsAll...)
+
+	tt := ui.NewTester(app.View, 402, 844)
+	if err := tt.Click("探索"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 48*time.Millisecond)
+	if !tt.HasText("老北京现场鸟") {
+		t.Fatalf("expected old region photo visible before switch, texts=%q", tt.Texts())
+	}
+
+	// 1. 切换地区应立即清空旧数据并进入灰色骨架卡片加载，顶部不出现转圈动画
+	app.regCustomCode = ""
+	app.regRegionLabel = "四川 (CN-51)"
+	app.resetExploreForRegionChange()
+	advanceUI(tt, 32*time.Millisecond)
+
+	if !app.regPhotoBusy || len(app.regFieldPhotos) != 0 || len(app.regObsList) != 0 || app.regStat != nil || len(app.hsFiltered) != 0 {
+		t.Fatalf("expected immediate stale cache clear and busy=true, busy=%v photos=%d obs=%d hs=%d",
+			app.regPhotoBusy, len(app.regFieldPhotos), len(app.regObsList), len(app.hsFiltered))
+	}
+	if tt.HasText("老北京现场鸟") || tt.HasText("加载中") {
+		t.Fatalf("expected no stale card and no header spinner after region change, texts=%q", tt.Texts())
+	}
+	if img := tt.Image(); img.Bounds().Dx() != 402 {
+		t.Fatalf("unexpected photo skeleton render bounds: %v", img.Bounds())
+	}
+
+	// 2. 切换上方 4 个选项卡时也立即进入骨架卡片，不显示转圈
+	for _, tab := range []string{"近期目击", "珍稀记录", "观鸟热点", "现场实拍"} {
+		if err := tt.Click(tab); err != nil {
+			t.Fatal(err)
+		}
+		advanceUI(tt, 32*time.Millisecond)
+		if tt.HasText("加载中") {
+			t.Fatalf("expected no spinner after switching to %q, texts=%q", tab, tt.Texts())
+		}
+		if img := tt.Image(); img.Bounds().Dy() != 844 {
+			t.Fatalf("unexpected skeleton render bounds on %q: %v", tab, img.Bounds())
+		}
+	}
+
+	// 3. 验证图鉴/探索实拍/日志在首行(0)与滚动离开首行(40)条件遮罩均可正常渲染
+	if err := tt.Click("图鉴"); err != nil {
+		t.Fatal(err)
+	}
+	app.guideScroll.Y = 0
+	advanceUI(tt, 32*time.Millisecond)
+	_ = tt.Image()
+	app.guideScroll.Y = 40
+	advanceUI(tt, 32*time.Millisecond)
+	_ = tt.Image()
+
+	if err := tt.Click("探索"); err != nil {
+		t.Fatal(err)
+	}
+	app.session.ExploreSubTab = 0
+	app.regPhotoBusy = false
+	app.regFieldPhotos = []model.FieldPhotoObs{{ID: 2, ComName: "测试鸟", SciName: "Test", Photos: []model.MediaPhoto{{URL: srv.URL + "/x.jpg"}}}}
+	app.exploreScroll[0].Y = 0
+	advanceUI(tt, 32*time.Millisecond)
+	_ = tt.Image()
+	app.exploreScroll[0].Y = 40
+	advanceUI(tt, 32*time.Millisecond)
+	_ = tt.Image()
+
+	if err := tt.Click("日志"); err != nil {
+		t.Fatal(err)
+	}
+	app.journalTimelineScroll.Y = 0
+	advanceUI(tt, 32*time.Millisecond)
+	_ = tt.Image()
+	if err := tt.Click("已解锁图谱"); err != nil {
+		t.Fatal(err)
+	}
+	app.journalLifelistScroll.Y = 0
+	advanceUI(tt, 32*time.Millisecond)
+	_ = tt.Image()
+	app.journalLifelistScroll.Y = 40
+	advanceUI(tt, 32*time.Millisecond)
+	_ = tt.Image()
 }

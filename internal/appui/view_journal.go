@@ -249,8 +249,16 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 		}
 	})
 
+	hasPhotos := false
+	for _, e := range a.filteredEntries {
+		if len(e.PhotoPaths) > 0 {
+			hasPhotos = true
+			break
+		}
+	}
+
 	ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
-		scroll := ui.Scroll(c.Key("j-timeline-scroll")).Fill()
+		scroll := ui.Scroll(c.Key("j-timeline-scroll")).Fill().TrackScroll(&a.journalTimelineScroll)
 		if scroll.PullToRefresh(&a.journalRefresh) {
 			a.refreshJournalList()
 			a.journalRefresh.Refreshing = false
@@ -355,7 +363,9 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 				}
 			})
 		})
-		scrollTopFadeScrim(c, t)
+		if hasPhotos {
+			scrollTopFadeScrim(c, t, a.journalTimelineScroll.Y)
+		}
 	})
 }
 
@@ -375,7 +385,7 @@ func (a *AppState) buildLifelistGrid(c *ui.Context, t *ui.Theme, unlocked []mode
 	}
 
 	ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
-		ui.Scroll(c.Key("ll-scroll")).Fill().Children(func() {
+		ui.Scroll(c.Key("ll-scroll")).Fill().TrackScroll(&a.journalLifelistScroll).Children(func() {
 			ui.Column(c).FillWidth().Padding(10, 18, 112, 18).Gap(12).Children(func() {
 				if len(visible) == 0 {
 					tactileCard(c, t).Padding(34).Center().Gap(10).Children(func() {
@@ -468,7 +478,9 @@ func (a *AppState) buildLifelistGrid(c *ui.Context, t *ui.Theme, unlocked []mode
 				}
 			})
 		})
-		scrollTopFadeScrim(c, t)
+		if len(visible) > 0 {
+			scrollTopFadeScrim(c, t, a.journalLifelistScroll.Y)
+		}
 	})
 }
 

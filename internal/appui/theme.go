@@ -531,8 +531,13 @@ func externalLinkChip(c *ui.Context, key, label string, icon *ui.SVG, url string
 	}
 }
 
-// scrollTopFadeScrim 在滚动容器顶部叠加柔顺渐隐过渡遮罩，消除固定顶栏与滚动内容的生硬截断。
-func scrollTopFadeScrim(c *ui.Context, t *ui.Theme) {
+// scrollTopFadeScrim 在有图列表离开首行后渐显顶部柔顺渐隐过渡遮罩，静止在首行时保持完全通透。
+func scrollTopFadeScrim(c *ui.Context, t *ui.Theme, scrollY float32) {
+	const startY, fullY float32 = 8, 28
+	if scrollY <= startY {
+		return
+	}
+	k := min(float32(1), (scrollY-startY)/(fullY-startY))
 	topCol := ui.Hex("#EEF2F7")
 	if t.Dark {
 		topCol = ui.Hex("#0E121B")
@@ -541,8 +546,8 @@ func scrollTopFadeScrim(c *ui.Context, t *ui.Theme) {
 		LinearGradient(ui.LinearGradient{
 			Angle: 180,
 			Stops: []ui.GradientStop{
-				{Color: topCol.Alpha(0.98), At: 0},
-				{Color: topCol.Alpha(0.68), At: 0.48},
+				{Color: topCol.Alpha(0.98 * k), At: 0},
+				{Color: topCol.Alpha(0.68 * k), At: 0.48},
 				{Color: topCol.Alpha(0), At: 1.0},
 			},
 		})

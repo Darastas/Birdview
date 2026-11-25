@@ -126,7 +126,6 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 					})
 				})
 			})
-			scrollTopFadeScrim(c, t)
 		})
 	})
 }
