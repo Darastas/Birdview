@@ -14,6 +14,7 @@ import (
 	"github.com/Darastas/Birdview/internal/model"
 	"github.com/Darastas/Birdview/internal/store"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/plugins/location"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
@@ -155,11 +156,12 @@ type AppState struct {
 	zoomState      mobile.ZoomState
 
 	// 设置状态
-	setEbirdKey     string
-	setXenoKey      string
-	setShowKeys     bool
-	setKeySheetOpen bool
-	setRegionLabel  string
+	setEbirdKey       string
+	setXenoKey        string
+	setShowKeys       bool
+	setKeySheetOpen   bool
+	setAboutSheetOpen bool
+	setRegionLabel    string
 	setThemeMode    string
 	setVerifyBusy   bool
 	setVerifyMsg    string
@@ -331,49 +333,51 @@ func (a *AppState) View(c *ui.Context) {
 
 	rootView := a.isRootRoute()
 
-	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
-			a.router.View(c, func(r *ui.Route) {
-				switch {
-				case r.Match("/guide"):
-					r.Title("图鉴")
-					a.viewGuideHome(c, t)
-				case r.Match("/guide/{code}"):
-					r.Title("鸟种详情")
-					a.viewGuideDetailPage(c, t, r.Param("code"))
-				case r.Match("/explore"):
-					r.Title("探索")
-					a.viewExploreHome(c, t)
-				case r.Match("/explore/photo/{id}"):
-					r.Title("现场实拍")
-					a.viewExplorePhotoDetail(c, t, r.Param("id"))
-				case r.Match("/explore/check/{id}"):
-					r.Title("观鸟清单")
-					a.viewExploreChecklistDetail(c, t, r.Param("id"))
-				case r.Match("/explore/spot/{id}"):
-					r.Title("观鸟热点")
-					a.viewExploreHotspotDetail(c, t, r.Param("id"))
-				case r.Match("/journal"):
-					r.Title("日志")
-					a.viewJournalHome(c, t)
-				case r.Match("/journal/{id}"):
-					r.Title("日志详情")
-					a.viewJournalDetailPage(c, t, r.Param("id"))
-				case r.Match("/settings"):
-					r.Title("设置")
-					a.viewSettingsHome(c, t)
-				default:
-					r.Title("图鉴")
-					a.viewGuideHome(c, t)
-				}
+	ui.Box(c).Fill().Background(t.Background).Children(func() {
+		applyCanvasBackground(ui.Box(c).Fill(), t).Children(func() {
+			ui.Box(c).Fill().Children(func() {
+				a.router.View(c, func(r *ui.Route) {
+					switch {
+					case r.Match("/guide"):
+						r.Title("图鉴")
+						a.viewGuideHome(c, t)
+					case r.Match("/guide/{code}"):
+						r.Title("鸟种详情")
+						a.viewGuideDetailPage(c, t, r.Param("code"))
+					case r.Match("/explore"):
+						r.Title("探索")
+						a.viewExploreHome(c, t)
+					case r.Match("/explore/photo/{id}"):
+						r.Title("现场实拍")
+						a.viewExplorePhotoDetail(c, t, r.Param("id"))
+					case r.Match("/explore/check/{id}"):
+						r.Title("观鸟清单")
+						a.viewExploreChecklistDetail(c, t, r.Param("id"))
+					case r.Match("/explore/spot/{id}"):
+						r.Title("观鸟热点")
+						a.viewExploreHotspotDetail(c, t, r.Param("id"))
+					case r.Match("/journal"):
+						r.Title("日志")
+						a.viewJournalHome(c, t)
+					case r.Match("/journal/{id}"):
+						r.Title("日志详情")
+						a.viewJournalDetailPage(c, t, r.Param("id"))
+					case r.Match("/settings"):
+						r.Title("设置")
+						a.viewSettingsHome(c, t)
+					default:
+						r.Title("图鉴")
+						a.viewGuideHome(c, t)
+					}
+				})
 			})
+
+			a.buildMiniAudioBar(c, t, rootView)
+
+			if rootView && floatingGlassDock(c, &a.session.Tab, t) {
+				a.SelectTab(a.session.Tab)
+			}
 		})
-
-		a.buildMiniAudioBar(c, t)
-
-		if rootView && minimalBottomBar(c, &a.session.Tab, t) {
-			a.SelectTab(a.session.Tab)
-		}
 	})
 
 	a.viewRegionPickerSheet(c, t)
@@ -383,10 +387,11 @@ func (a *AppState) View(c *ui.Context) {
 	a.viewJournalExportActionSheet(c)
 	a.viewJournalDeleteDialog(c)
 	a.viewSettingsKeySheet(c, t)
+	a.viewSettingsAboutSheet(c, t)
 	a.viewPhotoZoomOverlay(c, t)
 }
 
-func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme) {
+func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme, aboveDock bool) {
 	st := a.player.Status()
 	if !st.Active {
 		return
@@ -394,55 +399,76 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme) {
 	if st.Playing || st.Loading {
 		c.After(120 * time.Millisecond)
 	}
+	_, _, bottom, _ := c.SafeArea()
+	barBottom := max(float32(14), bottom+10)
+	if aboveDock && bottom <= keyboardInsetThreshold {
+		barBottom = max(float32(84), bottom+78)
+	}
 
-	ui.Column(c).FillWidth().Padding(4, 20, 8, 20).Shrink(0).Children(func() {
-		card := flatSurface(c, t).Radius(14).Border(1, t.Border).Clip()
-		card.Children(func() {
-			ui.Row(c).FillWidth().Padding(10, 12).Gap(10).AlignItems(ui.Center).Children(func() {
-				if st.Loading {
-					ui.Box(c).Size(34, 34).Center().Children(func() {
-						ui.Spinner(c).Label("加载音频中")
-					})
-				} else {
-					ic := iconPlay
-					lbl := "播放"
-					if st.Playing {
-						ic = iconPause
-						lbl = "暂停"
-					}
-					if circleIconBtn(c, "mini-toggle", lbl, ic, t.Accent, t.AccentText, 34).Clicked() {
-						a.player.TogglePause()
-					}
-				}
+	card := ui.Column(c.Key("mini-audio-bar")).Absolute().Left(16).Right(16).Bottom(barBottom).
+		Radius(18).Clip().
+		Material(glass.Glass{Style: glass.Regular})
+	if t.Dark {
+		card.Border(1, ui.RGBA(255, 255, 255, 0.14)).
+			Shadow(0, 10, 26, -4, ui.RGBA(0, 0, 0, 0.5))
+	} else {
+		card.Border(1, ui.RGBA(255, 255, 255, 0.72)).
+			Shadow(0, 8, 22, -4, ui.RGBA(15, 23, 42, 0.14))
+	}
 
-				ui.Column(c).Grow(1).Basis(0).Gap(1).Children(func() {
-					ui.Text(c, st.Title).FontSize(13.5).FontWeight(600).SingleLine()
-					sub := st.Subtitle
-					if st.ErrMsg != "" {
-						sub = st.ErrMsg
-					} else if st.Duration > 0 {
-						sub = fmt.Sprintf("%s / %s · %s", formatDuration(st.Position), formatDuration(st.Duration), st.Subtitle)
-					}
-					ui.Text(c, sub).FontSize(11.5).TextColor(t.TextMuted).SingleLine()
+	card.Children(func() {
+		ui.Row(c).FillWidth().Padding(10, 12).Gap(10).AlignItems(ui.Center).Children(func() {
+			if st.Loading {
+				ui.Box(c).Size(36, 36).Center().Children(func() {
+					ui.Spinner(c).Label("加载音频中")
 				})
-
-				if circleIconBtn(c, "mini-stop", "关闭播放器", iconClose, t.Background, t.TextMuted, 28).Clicked() {
-					a.player.Stop()
+			} else {
+				ic := iconPlay
+				lbl := "播放"
+				if st.Playing {
+					ic = iconPause
+					lbl = "暂停"
 				}
+				playBtn := applySculptedPrimaryStyle(
+					ui.Box(c.Key("mini-toggle")).Size(36, 36).Radius(18).Center().Shrink(0).
+						Role(ui.RoleButton).Label(lbl).Children(func() {
+						ui.Icon(c, ic).FontSize(15).TextColor(t.AccentText)
+					}),
+					t,
+				)
+				if playBtn.Clicked() {
+					a.player.TogglePause()
+				}
+			}
+
+			ui.Column(c).Grow(1).Basis(0).Gap(1).Children(func() {
+				ui.Text(c, st.Title).FontSize(14).FontWeight(500).SingleLine()
+				sub := st.Subtitle
+				if st.ErrMsg != "" {
+					sub = st.ErrMsg
+				} else if st.Duration > 0 {
+					sub = fmt.Sprintf("%s / %s · %s", formatDuration(st.Position), formatDuration(st.Duration), st.Subtitle)
+				}
+				ui.Text(c, sub).FontSize(12).TextColor(secondaryTextColor(t)).SingleLine()
 			})
 
-			if st.Duration > 0 {
-				frac := float32(st.Position) / float32(st.Duration)
-				if frac < 0 {
-					frac = 0
-				} else if frac > 1 {
-					frac = 1
-				}
-				ui.Box(c).FillWidth().Height(2).Background(t.Border).Draw(func(p *ui.Painter, r ui.Rect) {
-					p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * frac, H: r.H}, t.Accent, 1)
-				})
+			if circleIconBtn(c, "mini-stop", "关闭播放器", iconClose, softPillColor(t), t.TextMuted, 28).Clicked() {
+				a.player.Stop()
 			}
 		})
+
+		if st.Duration > 0 {
+			frac := float32(st.Position) / float32(st.Duration)
+			if frac < 0 {
+				frac = 0
+			} else if frac > 1 {
+				frac = 1
+			}
+			optA, _ := opticalAccentColors(t)
+			ui.Box(c).FillWidth().Height(2.5).Background(subtleHairlineColor(t)).Draw(func(p *ui.Painter, r ui.Rect) {
+				p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * frac, H: r.H}, optA, 1.2)
+			})
+		}
 	})
 }
 
