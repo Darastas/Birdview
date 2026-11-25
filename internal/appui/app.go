@@ -2,8 +2,10 @@ package appui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,37 +14,48 @@ import (
 	"github.com/Darastas/Birdview/internal/model"
 	"github.com/Darastas/Birdview/internal/store"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/location"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/mobile"
+	"github.com/egoist/mygo/ui/netimage"
 )
 
-const maxMemImages = 48
+const maxMemLocalImages = 24
 
-// AppState 管理整个应用的状态、后台异步数据加载与原生 UI 视图构建。
+var tabRoutes = []string{"/guide", "/explore", "/journal", "/settings"}
+
+// MobileSession 保存轻量移动端页面切换状态，供 mygo.KeepState 热恢复。
+type MobileSession struct {
+	Tab            int
+	GuideScope     int
+	GuideQuery     string
+	ExploreSubTab  int
+	JournalSubTab  int
+	JournalQuery   string
+	LifelistFilter string
+}
+
+// AppState 管理移动端路由、数据加载、音频控制与原生 UI 视图状态。
 type AppState struct {
-	win    *mygo.Window
+	win      *mygo.Window
 	store    *store.Store
 	cache    *store.Cache
 	client   *api.Client
 	player   *audioctl.PlayerController
 	recorder audioctl.Recorder
 
-	// 导航与全局布局状态
-	page         string
-	guideSplit   float32
-	journalSplit float32
-	regionSplit  float32
-	hotspotSplit float32
+	session *MobileSession
+	router  *ui.Router
 
-	// 一次性 Toast 队列（在下一次视图构建时通过 c.Toast 发出）
 	pendingToast string
 
-	// 图片内存解码缓存（仅存已解码 ImageSource，不存 ui.Element）
-	imgCache   map[string]ui.ImageSource
-	imgOrder   []string
-	imgLoading map[string]bool
-	imgErr     map[string]string
+	// 本地用户照片内存缓存（网络图已交由 ui/netimage 统一缓存与按需下载）
+	localImgCache   map[string]ui.ImageSource
+	localImgOrder   []string
+	localImgLoading map[string]bool
+	localImgErr     map[string]string
 
-	// 全局名录与物种索引
+	// 全局鸟类名录与缩略图缓存
 	allTaxa        []model.Taxon
 	taxonByCode    map[string]model.Taxon
 	chinaCodes     map[string]bool
@@ -50,88 +63,102 @@ type AppState struct {
 	regionCodesFor string
 	taxaLoading    bool
 	taxaErr        string
+	thumbMap       map[string]string
+	thumbTried     map[string]bool
+	thumbSem       chan struct{}
+	thumbPending   int
 
 	// 鸟类图鉴状态
-	guideScope      int // 0=中国鸟类, 1=当前省份, 2=全球名录, 3=已解锁
-	guideQuery      string
-	guideOrder      string
-	guideFamily     string
-	guideOrders     []string
-	guideFamilies   []string
-	filteredTaxa    []model.Taxon
-	guideList       ui.ListState
-	guideSelected   int
-	guideActiveCode string
-	guideMediaMap   map[string]*model.SpeciesMedia
-	guideMediaBusy  map[string]bool
-	guidePhotoIndex int
+	guideOrder       string
+	guideFamily      string
+	guideOrders      []string
+	guideFamilies    []string
+	filteredTaxa     []model.Taxon
+	guideList        ui.ListState
+	guideRefresh     ui.RefreshState
+	guideFilterSheet bool
+	guideActiveCode  string
+	guideMediaMap    map[string]*model.SpeciesMedia
+	guideMediaBusy   map[string]bool
+	guideGallery     mobile.PageState
 
-	// 观鸟日志与已解锁鸟种状态
-	journalSpeciesOpts []string
-	journalQuery       string
-	filteredEntries    []model.JournalEntry
-	journalList        ui.ListState
-	journalSelected    int
-	journalActiveID    string
-	journalPhotoIndex  int
-	journalPrefillCode string
-	journalModalOpen   bool
-	jEditID            string
-	jDraftSpecies      string
-	jDraftObservedAt   string
-	jDraftLocation     string
-	jDraftCount        string
-	jDraftNotes        string
-	jDraftPhotos       []string
-	jDraftAudio        string
-	jDraftError        string
-	jDeleteConfirm     bool
-	jDeleteTargetID    string
-	lifelistFilter     string
-	lifelistSelected   string
-
-	// 区域观鸟动态状态
+	// 区域探索（现场实拍 + eBird 观测 + 热点）
 	regionalRegion     string
-	regSourceTab       int // 0=eBird近期观测, 1=eBird珍稀记录, 2=区域现场实拍
 	regRegionLabel     string
-	regBackLabel       string
 	regCustomCode      string
-	regObsBusy         bool
-	regObsErr          string
-	regObsList         []model.Observation
-	regList            ui.ListState
-	regSelected        int
-	regActiveSubID     string
-	regActiveObsID     string
-	regActiveSpCode    string
-	regStat            *model.RegionStat
-	regChecklistMap    map[string]*model.ChecklistDetail
-	regChecklistBusy   map[string]bool
-	regPhotoBusy       bool
-	regPhotoErr        string
-	regFieldPhotos     []model.FieldPhotoObs
-	regPhotoList       ui.ListState
-	regPhotoSelected   int
-	regPhotoGalleryIdx int
+	regBackLabel       string
+	regRegionSheetOpen bool
+	regRegionQuery     string
+	regRegionTarget    string // "explore" 或 "settings"
+	regGPSBusy         bool
+	regGPSNote         string
 
-	// 观鸟热点探索状态
+	regObsBusy       bool
+	regObsErr        string
+	regObsList       []model.Observation
+	regActiveSubID   string
+	regActiveObsID   string
+	regSelectedObs   *model.Observation
+	regStat          *model.RegionStat
+	regChecklistMap  map[string]*model.ChecklistDetail
+	regChecklistBusy map[string]bool
+
+	regPhotoBusy    bool
+	regPhotoErr     string
+	regFieldPhotos  []model.FieldPhotoObs
+	regPhotoPager   mobile.PageState
+	regActivePhoto  *model.FieldPhotoObs
+	exploreRefresh  ui.RefreshState
+
 	hsRegionLabel string
 	hsQuery       string
-	hsSortMode    int // 0=累计鸟种数, 1=最近活跃日期
+	hsSortMode    int // 0=鸟种最多, 1=最近活跃
 	hsBusy        bool
 	hsErr         string
 	hsAll         []model.Hotspot
 	hsFiltered    []model.Hotspot
-	hsList        ui.ListState
-	hsSelected    int
-	hsActiveLocID string
+	hsActiveSpot  *model.Hotspot
 	hsObsMap      map[string][]model.Observation
 	hsObsBusy     map[string]bool
 
-	// 设置页面状态
+	// 观鸟日志 & 已解锁图谱
+	journalSpeciesOpts []string
+	filteredEntries    []model.JournalEntry
+	journalRefresh     ui.RefreshState
+	journalActiveEntry *model.JournalEntry
+	journalDetailPager mobile.PageState
+	journalSheetOpen   bool
+	journalPhotoSheet  bool
+	exportSheetOpen    bool
+	jEditID            string
+	jDraftSpecies      string
+	jDraftObservedAt   string
+	jDraftLocation     string
+	jDraftLat          float64
+	jDraftLng          float64
+	jDraftCount        int
+	jDraftNotes        string
+	jDraftPhotos       []string
+	jDraftAudio        string
+	jDraftError        string
+	jDraftGPSBusy      bool
+	jRecBusy           bool
+	jDeleteConfirm     bool
+	jDeleteTargetID    string
+
+	// 全屏照片缩放查看器
+	zoomOpen       bool
+	zoomTitle      string
+	zoomPhotos     []model.MediaPhoto
+	zoomLocalPaths []string
+	zoomPager      mobile.PageState
+	zoomState      mobile.ZoomState
+
+	// 设置状态
 	setEbirdKey     string
 	setXenoKey      string
 	setShowKeys     bool
+	setKeySheetOpen bool
 	setRegionLabel  string
 	setThemeMode    string
 	setVerifyBusy   bool
@@ -142,98 +169,85 @@ type AppState struct {
 	localDataBytes  int64
 }
 
-// NewAppState 初始化应用主状态对象。
-func NewAppState(st *store.Store, cache *store.Cache, client *api.Client) *AppState {
+// NewAppState 初始化移动端应用状态。
+func NewAppState(st *store.Store, cache *store.Cache, client *api.Client, sess *MobileSession) *AppState {
+	if sess == nil {
+		sess = &MobileSession{}
+	}
+	if sess.Tab < 0 || sess.Tab >= len(tabRoutes) {
+		sess.Tab = 0
+	}
 	cfg := st.Settings()
+	var thumbs map[string]string
+	if cache != nil {
+		thumbs = cache.LoadThumbIndex()
+	} else {
+		thumbs = make(map[string]string)
+	}
+
 	a := &AppState{
-		store:          st,
-		cache:          cache,
-		client:         client,
-		player:         audioctl.NewPlayerController(),
-		recorder:       audioctl.NewRecorder(),
-		page:           "guide",
-		guideSplit:     380,
-		journalSplit:   380,
-		regionSplit:    400,
-		hotspotSplit:   380,
-		imgCache:       make(map[string]ui.ImageSource),
-		imgLoading:     make(map[string]bool),
-		imgErr:         make(map[string]string),
-		taxonByCode:    make(map[string]model.Taxon),
-		chinaCodes:     make(map[string]bool),
-		regionCodes:    make(map[string]bool),
-		guideOrder:     "全部目",
-		guideFamily:    "全部科",
-		guideSelected:  -1,
-		journalSelected: -1,
-		guideMediaMap:  make(map[string]*model.SpeciesMedia),
-		guideMediaBusy: make(map[string]bool),
-		regionalRegion: cfg.DefaultRegion,
+		store:            st,
+		cache:            cache,
+		client:           client,
+		player:           audioctl.NewPlayerController(),
+		recorder:         audioctl.NewRecorder(),
+		session:          sess,
+		router:           ui.NewRouter(tabRoutes[sess.Tab]),
+		localImgCache:    make(map[string]ui.ImageSource),
+		localImgLoading:  make(map[string]bool),
+		localImgErr:      make(map[string]string),
+		taxonByCode:      make(map[string]model.Taxon),
+		chinaCodes:       make(map[string]bool),
+		regionCodes:      make(map[string]bool),
+		thumbMap:         thumbs,
+		thumbTried:       make(map[string]bool),
+		thumbSem:         make(chan struct{}, 3),
+		guideOrder:       "全部目",
+		guideFamily:      "全部科",
+		guideMediaMap:    make(map[string]*model.SpeciesMedia),
+		guideMediaBusy:   make(map[string]bool),
+		regionalRegion:   cfg.DefaultRegion,
 		regRegionLabel:   regionLabelByCode(cfg.DefaultRegion),
 		regBackLabel:     "近 14 天",
-		regSelected:      -1,
+		regRegionTarget:  "explore",
 		regChecklistMap:  make(map[string]*model.ChecklistDetail),
 		regChecklistBusy: make(map[string]bool),
-		regPhotoSelected: -1,
 		hsRegionLabel:    regionLabelByCode(cfg.DefaultRegion),
-		hsSelected:       -1,
 		hsObsMap:         make(map[string][]model.Observation),
 		hsObsBusy:        make(map[string]bool),
+		jDraftCount:      1,
 	}
+	a.router.Animation = &ui.Snappy
 	a.syncSettingsDraft()
 	a.refreshJournalList()
 	a.refreshStorageStats()
 	return a
 }
 
-// AttachWindow 绑定主窗口句柄，并触发启动后的首批异步数据拉取。
+// AttachWindow 绑定主窗口句柄，并触发启动后的异步名录拉取。
 func (a *AppState) AttachWindow(win *mygo.Window) {
 	a.win = win
-	a.loadInitialData()
+	a.loadTaxonomyAsync(false)
+	a.onTabActivated(a.session.Tab)
 }
 
-// SetPage 切换侧边栏主页面，供系统菜单和内部跳转按钮复用。
-func (a *AppState) SetPage(page string) {
-	a.page = page
-	a.onPageActivated()
+// SetRecorder 注入自定义录音器（测试用途）。
+func (a *AppState) SetRecorder(rec audioctl.Recorder) {
+	a.recorder = rec
+}
+
+func (a *AppState) hapticSelection() {
 	if a.win != nil {
-		a.win.Invalidate()
+		mygo.Haptics.Selection()
 	}
 }
 
-func (a *AppState) onPageActivated() {
-	switch a.page {
-	case "settings":
-		a.refreshStorageStats()
-	case "regional":
-		if a.win != nil && len(a.regObsList) == 0 && len(a.regFieldPhotos) == 0 && !a.regObsBusy && !a.regPhotoBusy && a.regObsErr == "" {
-			a.LoadRegionalData()
-		}
-	case "hotspots":
-		if a.win != nil && len(a.hsAll) == 0 && !a.hsBusy && a.hsErr == "" {
-			a.LoadHotspots()
-		}
+func (a *AppState) hapticSuccess() {
+	if a.win != nil {
+		mygo.Haptics.Success()
 	}
 }
 
-// RefreshCurrent 刷新当前页面的在线数据。
-func (a *AppState) RefreshCurrent() {
-	switch a.page {
-	case "guide":
-		a.loadTaxonomyAsync(true)
-	case "regional":
-		a.LoadRegionalData()
-	case "hotspots":
-		a.LoadHotspots()
-	case "settings":
-		a.refreshStorageStats()
-		if a.win != nil {
-			a.win.Invalidate()
-		}
-	}
-}
-
-// updateUI 在真实窗口运行时通过 Window.Update 切回主线程，无窗口测试时直接执行。
 func (a *AppState) updateUI(fn func()) {
 	if a.win != nil {
 		a.win.Update(fn)
@@ -245,6 +259,47 @@ func (a *AppState) updateUI(fn func()) {
 func (a *AppState) invalidateUI() {
 	if a.win != nil {
 		a.win.Invalidate()
+	}
+}
+
+func (a *AppState) isRootRoute() bool {
+	p := a.router.Path()
+	for _, r := range tabRoutes {
+		if p == r {
+			return true
+		}
+	}
+	return false
+}
+
+// SelectTab 切换底部主导航标签（供底栏及测试调用）。
+func (a *AppState) SelectTab(idx int) {
+	if idx < 0 || idx >= len(tabRoutes) {
+		return
+	}
+	a.session.Tab = idx
+	a.router.Replace(tabRoutes[idx])
+	a.hapticSelection()
+	a.onTabActivated(idx)
+	a.invalidateUI()
+}
+
+func (a *AppState) onTabActivated(idx int) {
+	switch idx {
+	case 1: // 探索
+		if a.win != nil && !a.regObsBusy && !a.regPhotoBusy && !a.hsBusy {
+			if len(a.regFieldPhotos) == 0 && len(a.regObsList) == 0 && len(a.hsAll) == 0 {
+				a.LoadExploreData()
+			}
+		}
+	case 3: // 设置
+		a.refreshStorageStats()
+	}
+}
+
+func (a *AppState) goBack() {
+	if a.router.CanGoBack() {
+		a.router.Back()
 	}
 }
 
@@ -265,12 +320,7 @@ func (a *AppState) refreshStorageStats() {
 	}
 }
 
-// SetRecorder 注入自定义录音器（主要用于单元测试模拟录音流程）。
-func (a *AppState) SetRecorder(rec audioctl.Recorder) {
-	a.recorder = rec
-}
-
-// View 是主窗口根视图函数（每帧在主线程执行，严禁做阻塞 I/O 或缓存 ui.Element）。
+// View 是移动端根视图函数（遵守每帧只声明构建的规则）。
 func (a *AppState) View(c *ui.Context) {
 	t := applyAppTheme(c)
 
@@ -279,73 +329,74 @@ func (a *AppState) View(c *ui.Context) {
 		a.pendingToast = ""
 	}
 
-	ui.Row(c).Fill().Children(func() {
-		a.buildSidebar(c, t)
+	navTabs := []mobile.BarButton{
+		{Label: "图鉴", Icon: paintIconGuide},
+		{Label: "探索", Icon: paintIconExplore},
+		{Label: "日志", Icon: paintIconJournal},
+		{Label: "设置", Icon: paintIconSettings},
+	}
 
-		ui.Column(c).Grow(1).FillHeight().Background(t.Background).Children(func() {
-			ui.Box(c).Grow(1).FillWidth().Children(func() {
-				switch a.page {
-				case "guide":
-					a.viewGuide(c, t)
-				case "journal":
-					a.viewJournal(c, t)
-				case "lifelist":
-					a.viewLifelist(c, t)
-				case "regional":
-					a.viewRegional(c, t)
-				case "hotspots":
-					a.viewHotspots(c, t)
-				case "settings":
-					a.viewSettings(c, t)
+	rootView := a.isRootRoute()
+
+	ui.Column(c).Fill().Background(t.Background).Children(func() {
+		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
+			a.router.View(c, func(r *ui.Route) {
+				switch {
+				case r.Match("/guide"):
+					r.Title("鸟类图鉴")
+					a.viewGuideHome(c, t)
+				case r.Match("/guide/{code}"):
+					r.Title("鸟种详情")
+					a.viewGuideDetailPage(c, t, r.Param("code"))
+				case r.Match("/explore"):
+					r.Title("区域探索")
+					a.viewExploreHome(c, t)
+				case r.Match("/explore/photo/{id}"):
+					r.Title("现场实拍")
+					a.viewExplorePhotoDetail(c, t, r.Param("id"))
+				case r.Match("/explore/check/{id}"):
+					r.Title("观鸟清单")
+					a.viewExploreChecklistDetail(c, t, r.Param("id"))
+				case r.Match("/explore/spot/{id}"):
+					r.Title("观鸟热点")
+					a.viewExploreHotspotDetail(c, t, r.Param("id"))
+				case r.Match("/journal"):
+					r.Title("观鸟日志")
+					a.viewJournalHome(c, t)
+				case r.Match("/journal/{id}"):
+					r.Title("日志详情")
+					a.viewJournalDetailPage(c, t, r.Param("id"))
+				case r.Match("/settings"):
+					r.Title("设置")
+					a.viewSettingsHome(c, t)
 				default:
-					a.viewGuide(c, t)
+					r.Title("鸟类图鉴")
+					a.viewGuideHome(c, t)
 				}
 			})
-			a.buildAudioBar(c, t)
 		})
+
+		a.buildMiniAudioBar(c, t)
+
+		if rootView {
+			bar := mobile.BottomBar(c, &a.session.Tab, navTabs...).BorderWidth(1, 0, 0, 0).BorderColor(subtleHairlineColor(t))
+			if bar.Changed() {
+				a.SelectTab(a.session.Tab)
+			}
+		}
 	})
 
-	a.viewJournalModal(c, t)
+	a.viewRegionPickerSheet(c, t)
+	a.viewGuideFilterSheet(c, t)
+	a.viewJournalComposerSheet(c, t)
+	a.viewJournalPhotoActionSheet(c)
+	a.viewJournalExportActionSheet(c)
 	a.viewJournalDeleteDialog(c)
+	a.viewSettingsKeySheet(c, t)
+	a.viewPhotoZoomOverlay(c, t)
 }
 
-func (a *AppState) buildSidebar(c *ui.Context, t *ui.Theme) {
-	unlockedCount := len(a.store.UnlockedBirds())
-	entriesCount := len(a.store.Entries())
-
-	if ui.Sidebar(c, &a.page, func() {
-		ui.SidebarSection(c, "资料与个人记录", nil, func() {
-			ui.SidebarItem(c, "guide", iconBook, "鸟类图鉴").Children(func() {
-				if len(a.allTaxa) > 0 {
-					ui.Badge(c, fmt.Sprintf("%d", len(a.filteredTaxa)))
-				}
-			})
-			ui.SidebarItem(c, "journal", iconJournal, "观鸟日志").Children(func() {
-				if entriesCount > 0 {
-					ui.Badge(c, fmt.Sprintf("%d", entriesCount))
-				}
-			})
-			ui.SidebarItem(c, "lifelist", iconAward, "已解锁鸟种").Children(func() {
-				if unlockedCount > 0 {
-					ui.Badge(c, fmt.Sprintf("%d", unlockedCount))
-				}
-			})
-		})
-
-		ui.SidebarSection(c, "实时观测数据", nil, func() {
-			ui.SidebarItem(c, "regional", iconGlobe, "区域观鸟动态")
-			ui.SidebarItem(c, "hotspots", iconMapPin, "观鸟热点探索")
-		})
-
-		ui.SidebarSection(c, "系统", nil, func() {
-			ui.SidebarItem(c, "settings", iconSettings, "设置")
-		})
-	}).Width(205).FillHeight().BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Changed() {
-		a.onPageActivated()
-	}
-}
-
-func (a *AppState) buildAudioBar(c *ui.Context, t *ui.Theme) {
+func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme) {
 	st := a.player.Status()
 	if !st.Active {
 		return
@@ -354,124 +405,355 @@ func (a *AppState) buildAudioBar(c *ui.Context, t *ui.Theme) {
 		c.After(120 * time.Millisecond)
 	}
 
-	ui.Row(c).FillWidth().Padding(10, 16).Gap(12).AlignItems(ui.Center).
-		Background(t.Surface).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
-		if st.Loading {
-			ui.Spinner(c).Label("加载音频中")
-		} else {
-			playIcon := iconPlay
-			label := "继续播放"
-			if st.Playing {
-				playIcon = iconPause
-				label = "暂停播放"
-			}
-			if ui.Button(c.Key("bar-toggle"), "").Label(label).Children(func() {
-				ui.Icon(c, playIcon).FontSize(14)
-			}).Clicked() {
-				a.player.TogglePause()
-			}
-		}
+	bar := ui.Column(c).FillWidth().Padding(0, 12, 8, 12).Shrink(0)
+	bar.Children(func() {
+		card := elevatedCard(c, t).Clip()
+		card.Children(func() {
+			ui.Row(c).FillWidth().Padding(10, 12).Gap(10).AlignItems(ui.Center).Children(func() {
+				if st.Loading {
+					ui.Box(c).Size(36, 36).Center().Children(func() {
+						ui.Spinner(c).Label("加载音频中")
+					})
+				} else {
+					ic := iconPlay
+					lbl := "播放"
+					if st.Playing {
+						ic = iconPause
+						lbl = "暂停"
+					}
+					if circleIconBtn(c, "mini-toggle", lbl, ic, t.Accent, t.AccentText, 36).Clicked() {
+						a.player.TogglePause()
+					}
+				}
 
-		if ui.Button(c.Key("bar-stop"), "").Label("停止播放").Children(func() {
-			ui.Icon(c, iconStop).FontSize(13)
-		}).Clicked() {
-			a.player.Stop()
-		}
+				ui.Column(c).Grow(1).Basis(0).Gap(1).Children(func() {
+					ui.Text(c, st.Title).FontSize(13.5).FontWeight(600).SingleLine()
+					sub := st.Subtitle
+					if st.ErrMsg != "" {
+						sub = st.ErrMsg
+					} else if st.Duration > 0 {
+						sub = fmt.Sprintf("%s / %s · %s", formatDuration(st.Position), formatDuration(st.Duration), st.Subtitle)
+					}
+					ui.Text(c, sub).FontSize(11.5).TextColor(t.TextMuted).SingleLine()
+				})
 
-		ui.Column(c).Width(210).Gap(2).Children(func() {
-			ui.Text(c, st.Title).Bold().SingleLine()
-			sub := st.Subtitle
-			if st.ErrMsg != "" {
-				sub = st.ErrMsg
-			}
-			ui.Text(c, sub).FontSize(11.5).TextColor(t.TextMuted).SingleLine()
-		})
+				if circleIconBtn(c, "mini-stop", "关闭播放器", iconClose, softPillColor(t), t.TextMuted, 30).Clicked() {
+					a.player.Stop()
+				}
+			})
 
-		// 进度滑块与时间码
-		var frac float64
-		if st.Duration > 0 {
-			frac = float64(st.Position) / float64(st.Duration)
-			if frac > 1 {
-				frac = 1
-			}
-		}
-		if st.Duration > 0 {
-			ui.Text(c, formatDuration(st.Position)).FontSize(11.5).TextColor(t.TextMuted).FontFeatures("tnum")
-			if ui.Slider(c.Key("bar-seek"), &frac, 0, 1).Label("播放进度").Grow(1).Changed() {
-				a.player.SeekFraction(frac)
-			}
-			ui.Text(c, formatDuration(st.Duration)).FontSize(11.5).TextColor(t.TextMuted).FontFeatures("tnum")
-		} else {
-			ui.Spacer(c)
-		}
-
-		ui.Row(c).Gap(6).AlignItems(ui.Center).Width(130).Children(func() {
-			ui.Icon(c, iconVolume).FontSize(15).TextColor(t.TextMuted)
-			vol := st.Volume
-			if ui.Slider(c.Key("bar-vol"), &vol, 0, 1).Label("音量").Grow(1).Changed() {
-				a.player.SetVolume(vol)
+			if st.Duration > 0 {
+				frac := float32(st.Position) / float32(st.Duration)
+				if frac < 0 {
+					frac = 0
+				} else if frac > 1 {
+					frac = 1
+				}
+				ui.Box(c).FillWidth().Height(2.5).Background(softPillColor(t)).Draw(func(p *ui.Painter, r ui.Rect) {
+					p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * frac, H: r.H}, t.Accent, 1.2)
+				})
 			}
 		})
 	})
 }
 
-func (a *AppState) loadImageAsync(key, pathOrURL string, isLocalFile bool) {
-	if key == "" || pathOrURL == "" {
+func (a *AppState) queueSpeciesThumb(tx model.Taxon) {
+	if a.win == nil || tx.SpeciesCode == "" || tx.SciName == "" {
 		return
 	}
-	if _, ok := a.imgCache[key]; ok || a.imgLoading[key] {
+	if _, ok := a.thumbMap[tx.SpeciesCode]; ok || a.thumbTried[tx.SpeciesCode] {
 		return
 	}
-	a.imgLoading[key] = true
-	delete(a.imgErr, key)
+	a.thumbTried[tx.SpeciesCode] = true
 
-	go func() {
-		var data []byte
-		var err error
-		if isLocalFile {
-			data, err = os.ReadFile(pathOrURL)
-		} else {
-			if a.cache != nil {
-				if cached, ok := a.cache.GetBlob("img:" + pathOrURL); ok {
-					data = cached
-				}
-			}
-			if len(data) == 0 {
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				data, err = a.client.FetchBytes(ctx, pathOrURL)
-				cancel()
-				if err == nil && a.cache != nil {
-					_ = a.cache.PutBlob("img:"+pathOrURL, data)
-				}
-			}
-		}
+	select {
+	case a.thumbSem <- struct{}{}:
+		go func(code, sciName string) {
+			defer func() { <-a.thumbSem }()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			url, err := a.client.FetchSpeciesThumb(ctx, sciName)
+			cancel()
 
+			a.updateUI(func() {
+				if err == nil && url != "" {
+					a.thumbMap[code] = url
+					a.thumbPending++
+					if a.cache != nil && a.thumbPending >= 6 {
+						a.thumbPending = 0
+						snapshot := copyStringMap(a.thumbMap)
+						go func() { _ = a.cache.SaveThumbIndex(snapshot) }()
+					}
+				}
+			})
+		}(tx.SpeciesCode, tx.SciName)
+	default:
+		// 并发上限已满时允许之后再次进入视口重试
+		delete(a.thumbTried, tx.SpeciesCode)
+	}
+}
+
+func copyStringMap(src map[string]string) map[string]string {
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+// loadLocalImageAsync 按移动端合理分辨率解码用户本地相册/相机照片。
+func (a *AppState) loadLocalImageAsync(path string) {
+	if path == "" {
+		return
+	}
+	if _, ok := a.localImgCache[path]; ok || a.localImgLoading[path] {
+		return
+	}
+	a.localImgLoading[path] = true
+	delete(a.localImgErr, path)
+
+	go func(p string) {
+		data, err := os.ReadFile(p)
 		var src ui.ImageSource
 		if err == nil {
-			src, err = ui.DecodeImage(data)
+			if bmp, derr := ui.DecodeBitmapScaled(data, 1200); derr == nil {
+				src = bmp
+			} else {
+				src, err = ui.DecodeImage(data)
+			}
 		}
-
 		a.updateUI(func() {
-			delete(a.imgLoading, key)
+			delete(a.localImgLoading, p)
 			if err != nil {
-				a.imgErr[key] = err.Error()
+				a.localImgErr[p] = err.Error()
 				return
 			}
-			a.putMemImageLocked(key, src)
+			if _, exists := a.localImgCache[p]; !exists {
+				a.localImgOrder = append(a.localImgOrder, p)
+			}
+			a.localImgCache[p] = src
+			for len(a.localImgOrder) > maxMemLocalImages {
+				oldest := a.localImgOrder[0]
+				a.localImgOrder = a.localImgOrder[1:]
+				delete(a.localImgCache, oldest)
+			}
+		})
+	}(path)
+}
+
+func (a *AppState) openNetworkPhotosViewer(title string, photos []model.MediaPhoto, idx int) {
+	if len(photos) == 0 {
+		return
+	}
+	a.zoomTitle = title
+	a.zoomPhotos = photos
+	a.zoomLocalPaths = nil
+	a.zoomPager.Page = max(0, min(idx, len(photos)-1))
+	a.zoomState.Reset()
+	a.zoomOpen = true
+}
+
+func (a *AppState) openLocalPhotosViewer(title string, paths []string, idx int) {
+	if len(paths) == 0 {
+		return
+	}
+	a.zoomTitle = title
+	a.zoomPhotos = nil
+	a.zoomLocalPaths = paths
+	a.zoomPager.Page = max(0, min(idx, len(paths)-1))
+	a.zoomState.Reset()
+	a.zoomOpen = true
+}
+
+func (a *AppState) viewPhotoZoomOverlay(c *ui.Context, t *ui.Theme) {
+	if !a.zoomOpen {
+		return
+	}
+	count := max(len(a.zoomPhotos), len(a.zoomLocalPaths))
+	if count == 0 {
+		a.zoomOpen = false
+		return
+	}
+	top, _, bottom, _ := c.SafeArea()
+
+	ui.Overlay(c, func() {
+		bg := ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
+			Background(ui.RGBA(8, 12, 20, 0.96)).Modal()
+		if bg.OverlayShortcut(0, ui.KeyEscape) {
+			a.zoomOpen = false
+		}
+		bg.Children(func() {
+			ui.Column(c).Fill().Children(func() {
+				// 顶部关闭栏
+				ui.Row(c).FillWidth().Padding(top+10, 16, 10, 16).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+					ui.Column(c).Grow(1).Gap(2).Children(func() {
+						ui.Text(c, a.zoomTitle).FontSize(16).FontWeight(600).TextColor(ui.RGB(255, 255, 255)).SingleLine()
+						ui.Textf(c, "第 %d / %d 张", a.zoomPager.Page+1, count).FontSize(12).TextColor(ui.RGBA(255, 255, 255, 0.72))
+					})
+					if circleIconBtn(c, "zoom-close", "关闭大图查看", iconClose, ui.RGBA(255, 255, 255, 0.16), ui.RGB(255, 255, 255), 36).Clicked() {
+						a.zoomOpen = false
+					}
+				})
+
+				// 可滑动与缩放主体
+				mobile.PageView(c, &a.zoomPager, count, func(i int) {
+					if i == a.zoomPager.Page {
+						mobile.Zoomable(c, &a.zoomState, mobile.ZoomOptions{Min: 1, Max: 4, DoubleTap: 2}, func() {
+							a.renderZoomSlide(c, i)
+						}).Fill()
+					} else {
+						a.renderZoomSlide(c, i)
+					}
+				}).Grow(1).Basis(0).FillWidth()
+
+				// 底部摄影署名说明
+				ui.Column(c).FillWidth().Padding(8, 16, bottom+14, 16).Gap(6).AlignItems(ui.Center).Children(func() {
+					if count > 1 {
+						mobile.PageDots(c, a.zoomPager.Page, count)
+					}
+					if len(a.zoomPhotos) > 0 && a.zoomPager.Page < len(a.zoomPhotos) {
+						p := a.zoomPhotos[a.zoomPager.Page]
+						ui.Textf(c, "来源：%s · 署名：%s", p.Source, p.Attribution).
+							FontSize(12).TextColor(ui.RGBA(255, 255, 255, 0.75)).TextAlign(ui.Center)
+					}
+				})
+			})
+		})
+	})
+}
+
+func (a *AppState) renderZoomSlide(c *ui.Context, i int) {
+	if len(a.zoomPhotos) > 0 && i < len(a.zoomPhotos) {
+		p := a.zoomPhotos[i]
+		netimage.Image(c.Key(fmt.Sprintf("zimg-%d", i)), p.URL, netimage.Options{
+			MaxSide:     1800,
+			Fit:         ui.Contain,
+			Placeholder: ui.RGBA(255, 255, 255, 0.05),
+		}).Fill()
+		return
+	}
+	if len(a.zoomLocalPaths) > 0 && i < len(a.zoomLocalPaths) {
+		lp := a.zoomLocalPaths[i]
+		a.loadLocalImageAsync(lp)
+		if src, ok := a.localImgCache[lp]; ok {
+			ui.Image(c, src).Fit(ui.Contain).Fill().Label("本地观鸟照片")
+		} else {
+			ui.Box(c).Fill().Center().Children(func() {
+				ui.Spinner(c).Label("加载照片中")
+			})
+		}
+	}
+}
+
+func (a *AppState) fillGPSLocationAsync(target string) {
+	if target == "explore" {
+		if a.regGPSBusy {
+			return
+		}
+		a.regGPSBusy = true
+		a.regGPSNote = ""
+	} else {
+		if a.jDraftGPSBusy {
+			return
+		}
+		a.jDraftGPSBusy = true
+	}
+	a.invalidateUI()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		fix, err := location.Current(ctx)
+		cancel()
+
+		a.updateUI(func() {
+			if target == "explore" {
+				a.regGPSBusy = false
+				if err != nil {
+					if errors.Is(err, errors.ErrUnsupported) {
+						a.regGPSNote = "桌面端暂不支持手机 GPS，请在下方选择省份或直接输入“纬度,经度”"
+					} else {
+						a.regGPSNote = fmt.Sprintf("定位失败: %v", err)
+					}
+					return
+				}
+				a.regCustomCode = fmt.Sprintf("%.4f,%.4f", fix.Latitude, fix.Longitude)
+				a.regRegionLabel = fmt.Sprintf("定位附近 (%.2f, %.2f)", fix.Latitude, fix.Longitude)
+				a.regRegionSheetOpen = false
+				a.LoadExploreData()
+			} else {
+				a.jDraftGPSBusy = false
+				if err != nil {
+					if errors.Is(err, errors.ErrUnsupported) {
+						a.pendingToast = "桌面端暂不支持 GPS 定位，可手动填写观测地点"
+					} else {
+						a.pendingToast = fmt.Sprintf("定位失败: %v", err)
+					}
+					return
+				}
+				a.jDraftLat = fix.Latitude
+				a.jDraftLng = fix.Longitude
+				if strings.TrimSpace(a.jDraftLocation) == "" {
+					a.jDraftLocation = fmt.Sprintf("%.4f, %.4f", fix.Latitude, fix.Longitude)
+				}
+				a.hapticSuccess()
+				a.pendingToast = "已填充当前坐标"
+			}
 		})
 	}()
 }
 
-func (a *AppState) putMemImageLocked(key string, src ui.ImageSource) {
-	if _, exists := a.imgCache[key]; !exists {
-		a.imgOrder = append(a.imgOrder, key)
+// ShareOrExportJournal 优先支持移动端系统分享，导出 CSV/JSON 时兼容 Android 文档保存与桌面保存对话框。
+func (a *AppState) ShareOrExportJournal(mode string) {
+	if mode == "share" {
+		entries := a.store.Entries()
+		unlocked := a.store.UnlockedBirds()
+		text := fmt.Sprintf("Birdview 观鸟记录：已解锁 %d 个鸟种，共记录 %d 条观测日志。", len(unlocked), len(entries))
+		var files []string
+		if len(entries) > 0 {
+			latest := entries[0]
+			text = fmt.Sprintf("我在 %s 观察到了 %s（%s）×%d，已累计解锁 %d 种鸟类。",
+				fallbackText(latest.Location, "野外现场"), latest.ComName, latest.SciName, max(1, latest.Count), len(unlocked))
+			if len(latest.PhotoPaths) > 0 {
+				files = append(files, latest.PhotoPaths[0])
+			}
+		}
+		go func() {
+			err := mygo.Share(mygo.ShareOptions{Text: text, Files: files})
+			if err != nil {
+				if errors.Is(err, errors.ErrUnsupported) {
+					a.ShareOrExportJournal("csv")
+					return
+				}
+				a.updateUI(func() {
+					a.pendingToast = fmt.Sprintf("分享失败: %v", err)
+				})
+			}
+		}()
+		return
 	}
-	a.imgCache[key] = src
-	for len(a.imgOrder) > maxMemImages {
-		oldest := a.imgOrder[0]
-		a.imgOrder = a.imgOrder[1:]
-		delete(a.imgCache, oldest)
-	}
+
+	defaultName := "birdview_journal." + mode
+	go func() {
+		dest, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+			Parent:      a.win,
+			Title:       "导出观鸟日志",
+			DefaultPath: defaultName,
+		})
+		if err != nil || dest == "" {
+			return
+		}
+		if mode == "csv" {
+			err = a.store.ExportJournalCSV(dest)
+		} else {
+			err = a.store.ExportJournalJSON(dest)
+		}
+		a.updateUI(func() {
+			if err != nil {
+				a.pendingToast = fmt.Sprintf("导出失败: %v", err)
+			} else {
+				a.pendingToast = "已导出观鸟日志至 " + filepath.Base(dest)
+			}
+		})
+	}()
 }
 
 func formatBytes(b int64) string {
@@ -500,6 +782,14 @@ func regionLabelByCode(code string) string {
 		}
 	}
 	return api.ChinaRegions[0].Name
+}
+
+func regionShortNameByCode(code string) string {
+	lbl := regionLabelByCode(code)
+	if idx := strings.Index(lbl, " ("); idx > 0 {
+		return lbl[:idx]
+	}
+	return lbl
 }
 
 func regionCodeByLabel(label string) string {
