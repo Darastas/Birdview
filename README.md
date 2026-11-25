@@ -1,71 +1,60 @@
 # Birdview
 
-基于 **Go + MyGo Native UI** 开发的跨平台桌面观鸟图鉴与个人观鸟日志软件。所有物种分类名录、图鉴照片、鸟鸣参考录音、中文百科及区域实时观鸟数据均通过在线 API 按需加载，无需在安装包内打包海量媒体素材。
+基于 **Go + MyGo v0.10.0 Native UI** 开发的跨平台移动端观鸟图鉴与个人观鸟日志应用（支持 **Android APK / AAB**、iOS 原生工程及桌面端手机视口预览）。所有物种名录、图鉴照片、鸟鸣参考录音、中文百科及区域实时观鸟数据均通过在线 API 按需流式加载，保持极轻量安装包体积。
 
 ## 核心功能
 
 ### 1. 鸟类图鉴
-- 接入 **eBird API v2** 全球物种级分类名录（支持大陆简体中文名录 `zh_SIM`、中国名录及当前省份筛选、已解锁筛选）。
-- 支持按**目 / 科**分类过滤，以及中文名、拉丁学名、物种代码即时检索。
-- 点击物种后按需在线加载：
-  - **iNaturalist Taxa** 物种标准高清生态照片（带摄影师署名与许可信息）；
-  - **iNaturalist Sounds** 免 Key 野外鸟鸣参考录音（支持在 **设置** 中配置 **Xeno-canto API v3 Key** 扩展专业曲库）；
-  - **中文维基百科 REST Summary** 物种简介与外部百科链接。
-- 内置流式音频播放器（基于 `mygo/audio`，支持 MP3 / WAV / OGG / FLAC / M4A），底部常驻播放进度与音量控制栏。
+- 接入 **eBird API v2** 全球物种级分类名录（大陆简体中文 `zh_SIM`，支持全国、当前省份及已解锁范围切换）。
+- 内置完整鸟纲目、科简体中文化索引，消除杂乱的英文分类混排。
+- 图鉴列表支持按需解析并缓存物种代表缩略图；点击进入详情可浏览高清图集（支持左右滑动轮播与全屏双指缩放）、流式播放 **iNaturalist Sounds** / **Xeno-canto v3** 鸟鸣参考录音，并阅读 **中文维基百科** 物种介绍。
 
-### 2. 观鸟日志与现场录音
-- 记录观测鸟种、时间、地点、数量与详细观察笔记，支持一键从图鉴或热点带入物种与地点。
-- 支持添加多张个人观测实拍照片。
-- **内置原生无 CGO 麦克风现场录音**（Windows 基于 `winmm.dll`，录音期间实时显示音量电平与时长，自动生成 44.1 kHz 单声道 WAV），同时支持导入本地音频文件并直接试听/回放。
-- 支持将个人日志导出为 **CSV**（UTF-8 BOM，兼容 Excel）或 **JSON**。
+### 2. 区域探索与观鸟热点
+- 集成手机 GPS 一键定位与全国 34 个省级行政区选择。
+- **严格区分「现场实拍」与「图鉴资料」**：
+  - **现场实拍**：拉取所在区域真实目击者拍摄并上传的现场摄影照片与现场录音，每张照片均严格对应当次观测记录。
+  - **近期目击 / 珍稀记录 / 观鸟热点**：基于 **eBird API v2** 展示昨日统计、区域目击动态、完整清单上下文及近 30 天高鸟种数观鸟热点；eBird 记录详情页绝不混排图鉴通用图。
 
-### 3. 已解锁鸟种（Life List）
-- 首次在观鸟日志中记录某一鸟种时自动点亮解锁，并统计中国鸟类名录解锁进度、累计观测次数与科属分布；删除全部对应记录时同步撤销解锁状态。
+### 3. 观鸟日志与已解锁鸟种
+- 支持拍摄现场照片或从系统相册选取图片（移动端原生调用 `plugins/imagepicker`，桌面端自动回退系统文件对话框）。
+- **原生麦克风现场录音**：通过自主封装的 `internal/micplugin`（Android `AudioRecord` / iOS `AVFoundation` / Windows `winmm.dll`）实时录制 44.1 kHz 单声道 WAV 鸟鸣并附带声波电平反馈，同时支持导入外部音频文件。
+- 首次记录鸟种自动解锁并累计观鸟成就进度与分科统计；支持左滑快速删除、CSV（UTF-8 BOM）/ JSON 导出与系统分享。
 
-### 4. 区域观鸟动态
-- 切换全国 34 个省级行政区、任意 eBird 区域码/热点 ID 或经纬度坐标（`lat, lng`），查看昨日地区统计、**eBird 近期观测**与**eBird 珍稀记录**。
-- 自动加载观测清单上下文（`Checklist` 观测人、观测时长、行进距离、现场备注与同清单伴生鸟种）。
-- **严格区分「现场观测图」与「图鉴标准图」**：eBird 观测记录详情绝不混排图鉴通用配图，而是准确展示该次清单的媒体计数与原清单跳转入口；切换至 **区域现场实拍**（iNaturalist Geo Observations）可浏览区域内观测者当次目击拍摄上传的真实照片与录音。
-
-### 5. 观鸟热点探索
-- 拉取各省市近 30 天活跃观鸟热点，支持按历史累计鸟种数或最近活跃日期排序、按名称/ID 检索。
-- 查看热点坐标、累计鸟种数、近期目击鸟种列表，并支持一键在指定热点新建观鸟日志。
-
-### 6. 设置与按需缓存
-- 在「设置」页面配置并在线验证个人 **eBird API Key**（优先保存至系统凭据管理器 `mygo.Secrets`，不支持时回退本地配置；亦可通过环境变量 `EBIRD_API_KEY` 注入）及可选 **Xeno-canto API v3 Key**。
-- 支持默认省份设置、外观切换（跟随系统 / 浅色 / 深色）、64 MB 有上限 LRU 磁盘媒体缓存查看与一键清理。
+### 4. 设置与在线缓存
+- 在「设置」页面配置并在线校验个人 **eBird API Key**（优先保存至系统凭据库 `mygo.Secrets` / Android Keystore / iOS Keychain）及可选 **Xeno-canto API v3 Key**。
+- 支持自动 / 浅色 / 深色外观实时切换，以及 64 MB 媒体缓存与网络图片缓存的一键统计清理。
 
 ---
 
-## 快速开始
+## 开发、测试与构建
 
 ### 环境要求
-- Go `1.27+`（纯 Go 构建，全程 `CGO_ENABLED=0`）
-- Windows 10/11（推荐）或 Linux / macOS
+- Go `1.27+`
+- Android 构建需配置 Android SDK、NDK 与 JDK 17（可通过 `go tool mygo doctor` 自检）
 
-### 本地运行与测试
+### 运行测试与检查
 
 ```bash
-# 运行全部单元测试与 UI 交互测试
-CGO_ENABLED=0 go test -v ./...
-
-# 运行 Go 与 MyGo 生命周期静态检查
+go test -v ./...
 go vet ./...
 go tool mygo vet .
-
-# 直接运行桌面应用
-go run .
 ```
 
-### 正式打包构建
+### Android 打包构建
 
 ```bash
-# 构建当前平台正式发布可执行文件（产物输出到 build/ 目录）
-go tool mygo build -skip-installer
+# 构建单架构快速验证（arm64）
+go tool mygo build -platform android/arm64
 
-# 交叉编译验证 Linux / Windows
-GOOS=linux CGO_ENABLED=0 go build ./...
-GOOS=windows CGO_ENABLED=0 go build ./...
+# 正式构建全架构安装包（输出 build/android/birdview-2.0.0.apk 与 .aab）
+go tool mygo build -platform android
+```
+
+### 桌面预览构建
+
+```bash
+go run .
+go tool mygo build -skip-installer
 ```
 
 ---
@@ -74,19 +63,20 @@ GOOS=windows CGO_ENABLED=0 go build ./...
 
 ```text
 Birdview/
-├── main.go                 # 程序入口、单实例锁、原生菜单栏与主窗口生命周期
-├── mygo.json               # MyGo 应用配置与打包信息
-├── resources/icon.png      # 1024×1024 应用图标
+├── main.go                 # 程序入口、窗口配置与生命周期
+├── mygo.json               # MyGo v0.10.0 应用及 Android/iOS 原生打包配置
+├── resources/              # 1024×1024 应用图标与 Android 自适应图标前景层
 └── internal/
-    ├── model/              # 领域数据模型定义
-    ├── store/              # 个人日志、鸟种解锁、设置与 64MB LRU 磁盘缓存
-    ├── api/                # eBird API v2、iNaturalist、Xeno-canto v3 与中文维基客户端
-    ├── audioctl/           # 流式音频播放器与 Windows 原生无 CGO 麦克风录音器
-    └── appui/              # 基于 MyGo Native UI 的各功能视图与交互测试
+    ├── model/              # 领域数据模型与鸟纲目/科中文化词典
+    ├── store/              # 个人观鸟日志、鸟种解锁、缩略图索引与 64MB LRU 缓存
+    ├── api/                # eBird v2、iNaturalist、Xeno-canto v3 与中文维基客户端
+    ├── audioctl/           # 跨平台流式播放器与麦克风录音控制
+    ├── micplugin/          # Android (Kotlin) / iOS (Swift) 原生麦克风录音插件
+    └── appui/              # 基于 MyGo v0.10.0 ui/mobile 的移动原生界面与交互测试
 ```
 
-## 数据存储与隐私说明
+## 数据安全与隐私
 
-- 所有网络请求均通过 `mygo/netproxy` 自动遵循系统代理设置。
-- 个人观鸟日志与导入/录制的图片、音频仅保存在本机用户数据目录（`PathUserData`），不上传至任何第三方服务器。
-- API Key 优先由操作系统凭据管理器（Windows 凭据管理器 / macOS 钥匙串 / Linux Secret Service）加密保存，严禁内置或硬编码至仓库源码。
+- 网络请求统一经由 `mygo/netproxy` 遵循系统代理。
+- 个人日志与录制/导入的照片和音频仅保存在本机应用数据目录，不上传至任何第三方服务器。
+- API Key 通过系统安全凭据库加密存放，严禁将任何真实 API Key 写入或提交至代码仓库。

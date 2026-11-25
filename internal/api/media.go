@@ -271,6 +271,26 @@ func (c *Client) FetchRegionalPhotoObservations(ctx context.Context, lat, lng fl
 	return out, nil
 }
 
+// FetchSpeciesThumb 为图鉴列表条目按需获取物种代表缩略图，严格核对拉丁学名避免张冠李戴。
+func (c *Client) FetchSpeciesThumb(ctx context.Context, sciName string) (string, error) {
+	trimmed := strings.TrimSpace(sciName)
+	if trimmed == "" {
+		return "", nil
+	}
+	u := fmt.Sprintf("%s/taxa?q=%s&rank=species&per_page=3&locale=zh-CN",
+		c.INatBaseURL, url.QueryEscape(trimmed))
+	var resp inatTaxaResp
+	if err := c.getJSON(ctx, u, nil, &resp); err != nil {
+		return "", err
+	}
+	for _, taxon := range resp.Results {
+		if strings.EqualFold(strings.TrimSpace(taxon.Name), trimmed) && taxon.DefaultPhoto.MediumURL != "" {
+			return taxon.DefaultPhoto.MediumURL, nil
+		}
+	}
+	return "", nil
+}
+
 func hasPhotoURL(list []model.MediaPhoto, u string) bool {
 	for _, p := range list {
 		if p.URL == u {
@@ -297,8 +317,9 @@ func fallbackStr(v, fb string) string {
 
 type inatTaxaResp struct {
 	Results []struct {
-		ID                int `json:"id"`
-		ObservationsCount int `json:"observations_count"`
+		ID                int    `json:"id"`
+		Name              string `json:"name"`
+		ObservationsCount int    `json:"observations_count"`
 		DefaultPhoto      struct {
 			MediumURL   string `json:"medium_url"`
 			Attribution string `json:"attribution"`

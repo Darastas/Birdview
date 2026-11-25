@@ -1,0 +1,18 @@
+{
+  "mobile": {
+    "id": "birdview_mic",
+    "ios": {
+      "sources": ["ios/*.swift"],
+      "class": "BirdviewMicPlugin",
+      "frameworks": ["AVFoundation"],
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "录制野外鸟鸣音频并保存到个人观鸟日志。"
+      }
+    },
+    "android": {
+      "sources": ["android/*.kt"],
+      "class": "BirdviewMicPlugin",
+      "permissions": ["RECORD_AUDIO"]
+    }
+  }
+}

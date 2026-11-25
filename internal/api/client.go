@@ -12,7 +12,7 @@ import (
 	"github.com/egoist/mygo/netproxy"
 )
 
-const defaultUserAgent = "BirdviewDesktop/1.0 (Go + MyGo Native UI)"
+const defaultUserAgent = "Birdview/2.0 (Go + MyGo Mobile)"
 
 // Client 封装遵循系统代理（netproxy）的统一 HTTP 客户端。
 type Client struct {

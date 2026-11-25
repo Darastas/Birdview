@@ -2,7 +2,7 @@ module github.com/Darastas/Birdview
 
 go 1.27.3
 
-require github.com/egoist/mygo v0.9.2
+require github.com/egoist/mygo v0.10.0
 
 require (
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect

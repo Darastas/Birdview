@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !android && !ios
 
 package audioctl
 
@@ -6,7 +6,7 @@ import "errors"
 
 type stubRecorder struct{}
 
-// NewRecorder 在非 Windows 平台返回不支持原生麦克风录音的占位实现（支持导入音频）。
+// NewRecorder 在不支持原生录音的桌面平台返回占位实现（支持导入音频）。
 func NewRecorder() Recorder {
 	return &stubRecorder{}
 }

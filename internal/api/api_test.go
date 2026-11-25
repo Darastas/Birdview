@@ -96,3 +96,25 @@ func TestGuideMediaVsRegionalFieldPhotosSeparation(t *testing.T) {
 		t.Fatalf("expected field photo from observation itself, got %+v", fieldObs)
 	}
 }
+
+func TestFetchSpeciesThumbExactMatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{
+			"results":[
+				{"id":1,"name":"Alcedo atthis taprobana","default_photo":{"medium_url":"https://example.com/subspecies.jpg"}},
+				{"id":2,"name":"Alcedo atthis","default_photo":{"medium_url":"https://example.com/exact_medium.jpg"}}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient()
+	c.INatBaseURL = srv.URL
+	got, err := c.FetchSpeciesThumb(context.Background(), "Alcedo atthis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://example.com/exact_medium.jpg" {
+		t.Fatalf("expected exact species match thumb, got %q", got)
+	}
+}

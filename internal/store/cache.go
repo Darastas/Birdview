@@ -104,6 +104,33 @@ func (c *Cache) SaveTaxonomy(locale string, taxa []model.Taxon) error {
 	return writeJSON(p, taxa)
 }
 
+// LoadThumbIndex 读取本地缓存的鸟种缩略图 URL 索引（按 SpeciesCode 索引）。
+func (c *Cache) LoadThumbIndex() map[string]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p := filepath.Join(c.dir, "species_thumbs.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return make(map[string]string)
+	}
+	var out map[string]string
+	if err := json.Unmarshal(data, &out); err != nil || out == nil {
+		return make(map[string]string)
+	}
+	return out
+}
+
+// SaveThumbIndex 持久化鸟种缩略图 URL 索引以减少图鉴列表重复请求。
+func (c *Cache) SaveThumbIndex(idx map[string]string) error {
+	if idx == nil {
+		idx = map[string]string{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p := filepath.Join(c.dir, "species_thumbs.json")
+	return writeJSON(p, idx)
+}
+
 // Stats 返回当前媒体缓存（含名录缓存）总字节数与文件数。
 func (c *Cache) Stats() (bytes int64, files int) {
 	c.mu.Lock()
