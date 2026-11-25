@@ -190,10 +190,10 @@ func (a *AppState) viewJournalListPane(c *ui.Context, t *ui.Theme) {
 					FontSize(12).TextColor(t.TextMuted)
 				ui.Row(c).Gap(6).Children(func() {
 					if ui.Button(c.Key("j-export-csv"), "导出 CSV").Clicked() {
-						a.exportJournalAsync(c, "csv")
+						a.ExportJournalDialog("csv")
 					}
 					if ui.Button(c.Key("j-export-json"), "导出 JSON").Clicked() {
-						a.exportJournalAsync(c, "json")
+						a.ExportJournalDialog("json")
 					}
 				})
 			})
@@ -668,7 +668,8 @@ func (a *AppState) pickJournalAudioAsync() {
 	}()
 }
 
-func (a *AppState) exportJournalAsync(c *ui.Context, format string) {
+// ExportJournalDialog 打开系统保存对话框并导出观鸟日志（支持 "csv" 或 "json"）。
+func (a *AppState) ExportJournalDialog(format string) {
 	defaultName := "birdview_journal." + format
 	go func() {
 		dest, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
@@ -692,7 +693,6 @@ func (a *AppState) exportJournalAsync(c *ui.Context, format string) {
 			}
 		})
 	}()
-	_ = c
 }
 
 func (a *AppState) viewLifelist(c *ui.Context, t *ui.Theme) {

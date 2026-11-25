@@ -166,3 +166,80 @@ func TestJournalCreateRecordAndUnlockSpecies(t *testing.T) {
 		t.Fatalf("expected unlocked bird in lifelist, texts=%q", tt.Texts())
 	}
 }
+
+func TestRegionalObsDoesNotMixGuidePhotosAndHotspotsView(t *testing.T) {
+	app := newTestAppState(t)
+
+	// 注入一条区域 eBird 观测及其对应的清单明细（含现场备注与媒体计数）
+	app.regObsList = []model.Observation{
+		{
+			SpeciesCode:     "hoopoe",
+			ComName:         "戴胜",
+			SciName:         "Upupa epops",
+			LocID:           "L12170807",
+			LocName:         "沙河水库--北岸",
+			ObsDt:           "2026-11-25 08:30",
+			HowMany:         2,
+			Lat:             40.136,
+			Lng:             116.313,
+			ObsValid:        true,
+			SubID:           "S999001",
+			ObsID:           "OBS999001",
+			UserDisplayName: "北京观鸟者",
+			HasRichMedia:    true,
+		},
+	}
+	app.regSelected = 0
+	app.regActiveSubID = "S999001"
+	app.regChecklistMap["S999001"] = &model.ChecklistDetail{
+		SubID:           "S999001",
+		UserDisplayName: "北京观鸟者",
+		DurationHrs:     1.5,
+		NumSpecies:      2,
+		Obs: []model.ChecklistObs{
+			{
+				SpeciesCode: "hoopoe",
+				ObsID:       "OBS999001",
+				HowManyStr:  "2",
+				Comments:    "草坪边缘觅食现场记录",
+				MediaCounts: map[string]int{"P": 2},
+			},
+		},
+	}
+
+	// 注入观鸟热点测试数据
+	app.hsAll = []model.Hotspot{
+		{LocID: "L12170807", LocName: "沙河水库--北岸", Subnational1Code: "CN-11", Lat: 40.136, Lng: 116.313, LatestObsDt: "2026-11-25", NumSpeciesAllTime: 268},
+		{LocID: "L5817879", LocName: "奥林匹克森林公园", Subnational1Code: "CN-11", Lat: 40.02, Lng: 116.39, LatestObsDt: "2026-11-24", NumSpeciesAllTime: 310},
+	}
+	app.applyHotspotFilterAndSort()
+	app.hsSelected = 0
+	app.hsActiveLocID = app.hsFiltered[0].LocID
+
+	tt := ui.NewTester(app.View, 1200, 780)
+
+	// 1. 切换到区域观鸟动态，确认显示现场媒体说明与清单上下文，且未加载戴胜的图鉴媒体
+	if err := tt.Click("区域观鸟动态"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("本次观测现场媒体（非图鉴标准图）") || !tt.HasText("草坪边缘觅食现场记录") {
+		t.Fatalf("expected regional checklist context and non-guide media notice, texts=%q", tt.Texts())
+	}
+	if _, loadedGuideForHoopoe := app.guideMediaMap["hoopoe"]; loadedGuideForHoopoe {
+		t.Fatal("regional observation view must NOT fetch or mix guide species media")
+	}
+
+	// 2. 切换到观鸟热点探索，确认排序与搜索生效，点击「在此处写日志」预填热点名称
+	if err := tt.Click("观鸟热点探索"); err != nil {
+		t.Fatal(err)
+	}
+	if app.hsFiltered[0].LocName != "奥林匹克森林公园" {
+		t.Fatalf("expected hotspots sorted by NumSpeciesAllTime desc, got %+v", app.hsFiltered)
+	}
+	if err := tt.Click("在此处写日志"); err != nil {
+		t.Fatal(err)
+	}
+	if !app.journalModalOpen || app.jDraftLocation != "奥林匹克森林公园" {
+		t.Fatalf("expected journal modal open with prefilled hotspot location, open=%v loc=%q", app.journalModalOpen, app.jDraftLocation)
+	}
+}

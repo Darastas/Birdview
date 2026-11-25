@@ -90,8 +90,43 @@ type AppState struct {
 	lifelistFilter     string
 	lifelistSelected   string
 
-	// 区域动态 / 热点（将在第4轮扩展）
-	regionalRegion string
+	// 区域观鸟动态状态
+	regionalRegion     string
+	regSourceTab       int // 0=eBird近期观测, 1=eBird珍稀记录, 2=区域现场实拍
+	regRegionLabel     string
+	regBackLabel       string
+	regCustomCode      string
+	regObsBusy         bool
+	regObsErr          string
+	regObsList         []model.Observation
+	regList            ui.ListState
+	regSelected        int
+	regActiveSubID     string
+	regActiveObsID     string
+	regActiveSpCode    string
+	regStat            *model.RegionStat
+	regChecklistMap    map[string]*model.ChecklistDetail
+	regChecklistBusy   map[string]bool
+	regPhotoBusy       bool
+	regPhotoErr        string
+	regFieldPhotos     []model.FieldPhotoObs
+	regPhotoList       ui.ListState
+	regPhotoSelected   int
+	regPhotoGalleryIdx int
+
+	// 观鸟热点探索状态
+	hsRegionLabel string
+	hsQuery       string
+	hsSortMode    int // 0=累计鸟种数, 1=最近活跃日期
+	hsBusy        bool
+	hsErr         string
+	hsAll         []model.Hotspot
+	hsFiltered    []model.Hotspot
+	hsList        ui.ListState
+	hsSelected    int
+	hsActiveLocID string
+	hsObsMap      map[string][]model.Observation
+	hsObsBusy     map[string]bool
 
 	// 设置页面状态
 	setEbirdKey     string
@@ -134,6 +169,16 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client) *AppSt
 		guideMediaMap:  make(map[string]*model.SpeciesMedia),
 		guideMediaBusy: make(map[string]bool),
 		regionalRegion: cfg.DefaultRegion,
+		regRegionLabel:   regionLabelByCode(cfg.DefaultRegion),
+		regBackLabel:     "近 14 天",
+		regSelected:      -1,
+		regChecklistMap:  make(map[string]*model.ChecklistDetail),
+		regChecklistBusy: make(map[string]bool),
+		regPhotoSelected: -1,
+		hsRegionLabel:    regionLabelByCode(cfg.DefaultRegion),
+		hsSelected:       -1,
+		hsObsMap:         make(map[string][]model.Observation),
+		hsObsBusy:        make(map[string]bool),
 	}
 	a.syncSettingsDraft()
 	a.refreshJournalList()
@@ -150,11 +195,24 @@ func (a *AppState) AttachWindow(win *mygo.Window) {
 // SetPage 切换侧边栏主页面，供系统菜单和内部跳转按钮复用。
 func (a *AppState) SetPage(page string) {
 	a.page = page
-	if page == "settings" {
-		a.refreshStorageStats()
-	}
+	a.onPageActivated()
 	if a.win != nil {
 		a.win.Invalidate()
+	}
+}
+
+func (a *AppState) onPageActivated() {
+	switch a.page {
+	case "settings":
+		a.refreshStorageStats()
+	case "regional":
+		if a.win != nil && len(a.regObsList) == 0 && len(a.regFieldPhotos) == 0 && !a.regObsBusy && !a.regPhotoBusy && a.regObsErr == "" {
+			a.LoadRegionalData()
+		}
+	case "hotspots":
+		if a.win != nil && len(a.hsAll) == 0 && !a.hsBusy && a.hsErr == "" {
+			a.LoadHotspots()
+		}
 	}
 }
 
@@ -163,6 +221,10 @@ func (a *AppState) RefreshCurrent() {
 	switch a.page {
 	case "guide":
 		a.loadTaxonomyAsync(true)
+	case "regional":
+		a.LoadRegionalData()
+	case "hotspots":
+		a.LoadHotspots()
 	case "settings":
 		a.refreshStorageStats()
 		if a.win != nil {
@@ -278,10 +340,8 @@ func (a *AppState) buildSidebar(c *ui.Context, t *ui.Theme) {
 		ui.SidebarSection(c, "系统", nil, func() {
 			ui.SidebarItem(c, "settings", iconSettings, "设置")
 		})
-	}).Width(205).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Changed() {
-		if a.page == "settings" {
-			a.refreshStorageStats()
-		}
+	}).Width(205).FillHeight().BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Changed() {
+		a.onPageActivated()
 	}
 }
 
@@ -412,22 +472,6 @@ func (a *AppState) putMemImageLocked(key string, src ui.ImageSource) {
 		a.imgOrder = a.imgOrder[1:]
 		delete(a.imgCache, oldest)
 	}
-}
-
-// 占位视图：区域观鸟动态、观鸟热点探索（将在第4轮完整实现）
-func (a *AppState) viewRegional(c *ui.Context, t *ui.Theme) {
-	a.viewPlaceholder(c, t, "区域观鸟动态", "即将接入 eBird 区域近期观测、清单详情与区域现场实拍记录")
-}
-
-func (a *AppState) viewHotspots(c *ui.Context, t *ui.Theme) {
-	a.viewPlaceholder(c, t, "观鸟热点探索", "即将接入 eBird 热点分布、累计鸟种排行与热点近期目击")
-}
-
-func (a *AppState) viewPlaceholder(c *ui.Context, t *ui.Theme, title, desc string) {
-	ui.Column(c).Fill().Center().Gap(8).Padding(24).Children(func() {
-		ui.Text(c, title).FontSize(18).Bold()
-		ui.Text(c, desc).TextColor(t.TextMuted)
-	})
 }
 
 func formatBytes(b int64) string {
