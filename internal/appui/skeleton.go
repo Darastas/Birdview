@@ -112,3 +112,54 @@ func skeletonTextLines(c *ui.Context, t *ui.Theme) {
 		}
 	})
 }
+
+// skeletonObsStatsCard 为近期目击/珍稀记录顶部统计区渲染 3 列等宽流光骨架卡。
+func skeletonObsStatsCard(c *ui.Context, t *ui.Theme) {
+	tactileCard(c, t).Padding(16, 8).Children(func() {
+		ui.Row(c).FillWidth().Dividers(1, subtleHairlineColor(t)).Children(func() {
+			for range 3 {
+				ui.Column(c).Grow(1).Basis(0).AlignItems(ui.Center).Gap(6).Children(func() {
+					skeletonShimmerBox(c, 7, t).Size(44, 22)
+					skeletonShimmerBox(c, 5, t).Size(52, 12)
+				})
+			}
+		})
+	})
+}
+
+// skeletonObsListCard 为近期目击/珍稀记录渲染带分割线的流光骨架列表卡片。
+func skeletonObsListCard(c *ui.Context, count int, t *ui.Theme) {
+	tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
+		for i := range count {
+			nameW := float32(42 + (i%3)*12)
+			locW := float32(58 + (i%2)*14)
+			ui.Row(c).FillWidth().Padding(13, 16).Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Column(c).Grow(1).Basis(0).Gap(6).Children(func() {
+					skeletonShimmerBox(c, 6, t).WidthPercent(nameW).Height(15)
+					skeletonShimmerBox(c, 5, t).WidthPercent(locW).Height(12)
+				})
+				ui.Column(c).AlignItems(ui.End).Gap(6).Shrink(0).Children(func() {
+					skeletonShimmerBox(c, 5, t).Size(36, 14)
+					skeletonShimmerBox(c, 4, t).Size(58, 11)
+				})
+			})
+		}
+	})
+}
+
+// skeletonHotspotListCard 为观鸟热点渲染带右侧种数徽章占位的流光骨架列表卡片。
+func skeletonHotspotListCard(c *ui.Context, count int, t *ui.Theme) {
+	tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
+		for i := range count {
+			nameW := float32(52 + (i%3)*11)
+			subW := float32(36 + (i%2)*10)
+			ui.Row(c).FillWidth().Padding(13, 16).Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Column(c).Grow(1).Basis(0).Gap(6).Children(func() {
+					skeletonShimmerBox(c, 6, t).WidthPercent(nameW).Height(15)
+					skeletonShimmerBox(c, 5, t).WidthPercent(subW).Height(12)
+				})
+				skeletonShimmerBox(c, 10, t).Size(54, 30).Shrink(0)
+			})
+		}
+	})
+}

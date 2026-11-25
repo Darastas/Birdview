@@ -291,6 +291,7 @@ func (a *AppState) applyGuideFilter() {
 	if len(out) > 0 {
 		a.guideList.ScrollIntoView(0)
 	}
+	a.guideScroll.Y = 0
 }
 
 func (a *AppState) ensureGuideMediaLoaded(tx model.Taxon) {
@@ -441,7 +442,7 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 		a.guideList.Label = nil
 
 		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
-			list := ui.List(c.Key("guide-taxa-list"), &a.guideList, rowCount).Fill()
+			list := ui.List(c.Key("guide-taxa-list"), &a.guideList, rowCount).Fill().TrackScroll(&a.guideScroll)
 			if list.PullToRefresh(&a.guideRefresh) {
 				a.loadTaxonomyAsync(true)
 			}
@@ -545,7 +546,9 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 					})
 				}
 			})
-			scrollTopFadeScrim(c, t)
+			if len(a.filteredTaxa) > 0 {
+				scrollTopFadeScrim(c, t, a.guideScroll.Y)
+			}
 		})
 	})
 }

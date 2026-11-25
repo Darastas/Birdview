@@ -76,6 +76,7 @@ type AppState struct {
 	guideFamilies    []string
 	filteredTaxa     []model.Taxon
 	guideList        ui.ListState
+	guideScroll      ui.ScrollState
 	guideRefresh     ui.RefreshState
 	guideFilterSheet bool
 	guideFilterQuery string
@@ -99,6 +100,7 @@ type AppState struct {
 	regObsBusy       bool
 	regObsErr        string
 	regObsList       []model.Observation
+	regObsSeq        uint64
 	regActiveSubID   string
 	regActiveObsID   string
 	regSelectedObs   *model.Observation
@@ -109,9 +111,11 @@ type AppState struct {
 	regPhotoBusy   bool
 	regPhotoErr    string
 	regFieldPhotos []model.FieldPhotoObs
+	regPhotoSeq    uint64
 	regPhotoPager  mobile.PageState
 	regActivePhoto *model.FieldPhotoObs
 	exploreRefresh ui.RefreshState
+	exploreScroll  [4]ui.ScrollState
 
 	hsRegionLabel string
 	hsQuery       string
@@ -120,14 +124,17 @@ type AppState struct {
 	hsErr         string
 	hsAll         []model.Hotspot
 	hsFiltered    []model.Hotspot
+	hsSeq         uint64
 	hsActiveSpot  *model.Hotspot
 	hsObsMap      map[string][]model.Observation
 	hsObsBusy     map[string]bool
 
 	// 观鸟日志 & 已解锁图谱
-	journalSpeciesOpts []string
-	filteredEntries    []model.JournalEntry
-	journalRefresh     ui.RefreshState
+	journalSpeciesOpts    []string
+	filteredEntries       []model.JournalEntry
+	journalTimelineScroll ui.ScrollState
+	journalLifelistScroll ui.ScrollState
+	journalRefresh        ui.RefreshState
 	journalActiveEntry *model.JournalEntry
 	journalDetailPager mobile.PageState
 	journalSheetOpen   bool
@@ -695,7 +702,7 @@ func (a *AppState) fillGPSLocationAsync(target string) {
 				a.regCustomCode = fmt.Sprintf("%.4f,%.4f", fix.Latitude, fix.Longitude)
 				a.regRegionLabel = fmt.Sprintf("定位附近 (%.2f, %.2f)", fix.Latitude, fix.Longitude)
 				a.regRegionSheetOpen = false
-				a.LoadExploreData()
+				a.resetExploreForRegionChange()
 			} else {
 				a.jDraftGPSBusy = false
 				if err != nil {

@@ -56,6 +56,26 @@ func (a *AppState) exploreRegionButtonText() string {
 	return regionShortNameByCode(a.regionalRegion)
 }
 
+// resetExploreForRegionChange 切换探索地区时立刻清空旧地区缓存与滚动位置，并使在途旧请求失效，确保界面马上进入灰色骨架卡片加载。
+func (a *AppState) resetExploreForRegionChange() {
+	a.regPhotoSeq++
+	a.regObsSeq++
+	a.hsSeq++
+	a.regPhotoBusy = false
+	a.regObsBusy = false
+	a.hsBusy = false
+	a.regPhotoErr = ""
+	a.regObsErr = ""
+	a.hsErr = ""
+	a.regFieldPhotos = nil
+	a.regObsList = nil
+	a.regStat = nil
+	a.hsAll = nil
+	a.hsFiltered = nil
+	a.exploreScroll = [4]ui.ScrollState{}
+	a.LoadExploreData()
+}
+
 // LoadExploreData 根据当前「探索」子分页加载现场实拍、eBird 近期/珍稀记录或观鸟热点。
 func (a *AppState) LoadExploreData() {
 	switch a.session.ExploreSubTab {
@@ -69,6 +89,9 @@ func (a *AppState) LoadExploreData() {
 }
 
 func (a *AppState) loadExploreFieldPhotos() {
+	if a.win == nil && len(a.regFieldPhotos) > 0 {
+		return
+	}
 	regionCode, lat, lng, isGeo := a.currentExploreRegionCode()
 	if !isGeo {
 		lat, lng = 39.9042, 116.4074
@@ -76,6 +99,9 @@ func (a *AppState) loadExploreFieldPhotos() {
 			lat, lng = opt.Lat, opt.Lng
 		}
 	}
+	a.regPhotoSeq++
+	seq := a.regPhotoSeq
+	a.regFieldPhotos = nil
 	a.regPhotoBusy = true
 	a.regPhotoErr = ""
 	a.invalidateUI()
@@ -86,6 +112,9 @@ func (a *AppState) loadExploreFieldPhotos() {
 		cancel()
 
 		a.updateUI(func() {
+			if seq != a.regPhotoSeq {
+				return
+			}
 			a.regPhotoBusy = false
 			a.exploreRefresh.Refreshing = false
 			if err != nil {
@@ -105,8 +134,11 @@ func (a *AppState) loadExploreObservations(notable bool) {
 	regionCode, lat, lng, isGeo := a.currentExploreRegionCode()
 	key := a.store.LoadEbirdKey()
 	if key == "" {
+		a.regObsSeq++
+		a.regObsBusy = false
 		a.regObsErr = "查询 eBird 观测动态需要配置 API Key，请前往「设置」填入（或切换至免 Key 的“现场实拍”）"
 		a.regObsList = nil
+		a.regStat = nil
 		a.exploreRefresh.Refreshing = false
 		a.invalidateUI()
 		return
@@ -120,6 +152,10 @@ func (a *AppState) loadExploreObservations(notable bool) {
 		backDays = 30
 	}
 
+	a.regObsSeq++
+	seq := a.regObsSeq
+	a.regObsList = nil
+	a.regStat = nil
 	a.regObsBusy = true
 	a.regObsErr = ""
 	a.invalidateUI()
@@ -152,6 +188,9 @@ func (a *AppState) loadExploreObservations(notable bool) {
 		wg.Wait()
 
 		a.updateUI(func() {
+			if seq != a.regObsSeq {
+				return
+			}
 			a.regObsBusy = false
 			a.exploreRefresh.Refreshing = false
 			if err != nil {
@@ -176,6 +215,8 @@ func (a *AppState) loadExploreHotspots() {
 	regionCode, _, _, _ := a.currentExploreRegionCode()
 	key := a.store.LoadEbirdKey()
 	if key == "" {
+		a.hsSeq++
+		a.hsBusy = false
 		a.hsErr = "查询观鸟热点需要配置 eBird API Key，请前往「设置」填写"
 		a.hsAll = nil
 		a.hsFiltered = nil
@@ -184,6 +225,10 @@ func (a *AppState) loadExploreHotspots() {
 		return
 	}
 
+	a.hsSeq++
+	seq := a.hsSeq
+	a.hsAll = nil
+	a.hsFiltered = nil
 	a.hsBusy = true
 	a.hsErr = ""
 	a.invalidateUI()
@@ -194,6 +239,9 @@ func (a *AppState) loadExploreHotspots() {
 		cancel()
 
 		a.updateUI(func() {
+			if seq != a.hsSeq {
+				return
+			}
 			a.hsBusy = false
 			a.exploreRefresh.Refreshing = false
 			if err != nil {
@@ -291,34 +339,31 @@ func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "探索").FontSize(26).FontWeight(600).LetterSpacing(-0.1).Role(ui.RoleHeading).Level(1)
 
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					if a.regPhotoBusy || a.regObsBusy || a.hsBusy {
-						ui.Spinner(c).Label("加载中")
-					}
-					locBtn := applySculptedSecondaryPillStyle(
-						ui.Row(c.Key("exp-region-btn")).Height(34).PaddingX(14).Radius(17).
-							Gap(5).AlignItems(ui.Center).Role(ui.RoleButton).Label("切换探索地区"),
-						t,
-					)
-					locBtn.Children(func() {
-						ui.Icon(c, iconMapPin).FontSize(13).TextColor(opticalAccentColor(t))
-						ui.Text(c, a.exploreRegionButtonText()).FontSize(13).FontWeight(500).SingleLine()
-					})
-					if locBtn.Clicked() {
-						a.regRegionTarget = "explore"
-						a.regGPSNote = ""
-						a.regRegionSheetOpen = true
-					}
+				locBtn := applySculptedSecondaryPillStyle(
+					ui.Row(c.Key("exp-region-btn")).Height(34).PaddingX(14).Radius(17).
+						Gap(5).AlignItems(ui.Center).Role(ui.RoleButton).Label("切换探索地区"),
+					t,
+				)
+				locBtn.Children(func() {
+					ui.Icon(c, iconMapPin).FontSize(13).TextColor(opticalAccentColor(t))
+					ui.Text(c, a.exploreRegionButtonText()).FontSize(13).FontWeight(500).SingleLine()
 				})
+				if locBtn.Clicked() {
+					a.regRegionTarget = "explore"
+					a.regGPSNote = ""
+					a.regRegionSheetOpen = true
+				}
 			})
 
 			if tactileSegmentedControl(c, "exp-seg", &a.session.ExploreSubTab, t, "现场实拍", "近期目击", "珍稀记录", "观鸟热点") {
+				a.exploreScroll[a.session.ExploreSubTab].Y = 0
 				a.LoadExploreData()
 			}
 		})
 
 		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
-			scroll := ui.Scroll(c.Key(fmt.Sprintf("exp-scroll-%d", a.session.ExploreSubTab))).Fill()
+			scroll := ui.Scroll(c.Key(fmt.Sprintf("exp-scroll-%d", a.session.ExploreSubTab))).Fill().
+				TrackScroll(&a.exploreScroll[a.session.ExploreSubTab])
 			if scroll.PullToRefresh(&a.exploreRefresh) {
 				a.LoadExploreData()
 			}
@@ -334,7 +379,9 @@ func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 					}
 				})
 			})
-			scrollTopFadeScrim(c, t)
+			if a.session.ExploreSubTab == 0 && len(a.regFieldPhotos) > 0 {
+				scrollTopFadeScrim(c, t, a.exploreScroll[0].Y)
+			}
 		})
 	})
 }
@@ -349,7 +396,7 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 		})
 		return
 	}
-	if len(a.regFieldPhotos) == 0 && a.regPhotoBusy {
+	if a.regPhotoBusy {
 		ui.Column(c).FillWidth().Gap(16).Children(func() {
 			for range 2 {
 				tactileCard(c, t).Clip().Children(func() {
@@ -389,23 +436,22 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 					photoSrc, _ := netimage.Load(c, obsItem.Photos[0].URL, netimage.Options{MaxSide: 960})
 					if photoSrc != nil {
 						ui.Image(c, photoSrc).Fill().Fit(ui.Cover).Role(ui.RoleImage)
+						ui.Row(c).Absolute().Right(12).Top(12).Gap(6).Children(func() {
+							if len(obsItem.Sounds) > 0 {
+								ui.Text(c, "录音").FontSize(11).FontWeight(500).Padding(4, 10).Radius(999).
+									Material(photoOverlayGlass(false)).
+									TextColor(ui.RGB(255, 255, 255))
+							}
+							if len(obsItem.Photos) > 1 {
+								ui.Textf(c, "1/%d", len(obsItem.Photos)).FontSize(11).FontWeight(500).Padding(4, 10).Radius(999).
+									Material(photoOverlayGlass(false)).
+									FontFeatures("tnum").
+									TextColor(ui.RGB(255, 255, 255))
+							}
+						})
 					} else {
 						skeletonBirdCard(c, 0, 42, t)
 					}
-
-					ui.Row(c).Absolute().Right(12).Top(12).Gap(6).Children(func() {
-						if len(obsItem.Sounds) > 0 {
-							ui.Text(c, "录音").FontSize(11).FontWeight(500).Padding(4, 10).Radius(999).
-								Material(photoOverlayGlass(false)).
-								TextColor(ui.RGB(255, 255, 255))
-						}
-						if len(obsItem.Photos) > 1 {
-							ui.Textf(c, "1/%d", len(obsItem.Photos)).FontSize(11).FontWeight(500).Padding(4, 10).Radius(999).
-								Material(photoOverlayGlass(false)).
-								FontFeatures("tnum").
-								TextColor(ui.RGB(255, 255, 255))
-						}
-					})
 				})
 
 				ui.Column(c).FillWidth().Padding(14, 16).Gap(4).Children(func() {
@@ -427,7 +473,9 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 }
 
 func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
-	if a.regStat != nil {
+	if a.regObsBusy {
+		skeletonObsStatsCard(c, t)
+	} else if a.regStat != nil {
 		tactileCard(c, t).Padding(14, 8).Children(func() {
 			ui.Row(c).FillWidth().Dividers(1, subtleHairlineColor(t)).Children(func() {
 				metricMiniCard(c, t, "昨日清单", fmt.Sprintf("%d", a.regStat.NumChecklists))
@@ -450,7 +498,7 @@ func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
 			a.regBackLabel = backOpts[backIdx]
 			a.LoadExploreData()
 		}
-		if len(a.regObsList) > 0 {
+		if !a.regObsBusy && len(a.regObsList) > 0 {
 			ui.Textf(c, "%d 条记录", len(a.regObsList)).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
 		}
 	})
@@ -467,7 +515,12 @@ func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
 		return
 	}
 
-	if len(a.regObsList) == 0 && !a.regObsBusy {
+	if a.regObsBusy {
+		skeletonObsListCard(c, 6, t)
+		return
+	}
+
+	if len(a.regObsList) == 0 {
 		tactileCard(c, t).Padding(32).Center().Gap(10).Children(func() {
 			tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
 				ui.Icon(c, iconGlobe).FontSize(22).TextColor(t.TextMuted)
@@ -522,7 +575,7 @@ func (a *AppState) buildExploreHotspotsFeed(c *ui.Context, t *ui.Theme) {
 		if tactileCompactSegment(c, "hs-sort-seg", &a.hsSortMode, t, "鸟种最多", "最近活跃") {
 			a.applyHotspotFilterAndSort()
 		}
-		if len(a.hsFiltered) > 0 {
+		if !a.hsBusy && len(a.hsFiltered) > 0 {
 			ui.Textf(c, "%d 个热点", len(a.hsFiltered)).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
 		}
 	})
@@ -539,7 +592,12 @@ func (a *AppState) buildExploreHotspotsFeed(c *ui.Context, t *ui.Theme) {
 		return
 	}
 
-	if len(a.hsFiltered) == 0 && !a.hsBusy {
+	if a.hsBusy {
+		skeletonHotspotListCard(c, 6, t)
+		return
+	}
+
+	if len(a.hsFiltered) == 0 {
 		tactileCard(c, t).Padding(32).Center().Gap(10).Children(func() {
 			tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
 				ui.Icon(c, iconMapPin).FontSize(22).TextColor(t.TextMuted)
@@ -994,7 +1052,7 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 							"地区码或纬度,经度（如 US-NY / 39.9,116.4）", "自定义地区", t).Grow(1)
 						if in.Submitted() || filterPill(c, "rp-go", "查询", true, t).Height(40).Radius(12).Clicked() {
 							a.regRegionSheetOpen = false
-							a.LoadExploreData()
+							a.resetExploreForRegionChange()
 						}
 					})
 				}
@@ -1037,7 +1095,7 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 							} else {
 								a.regCustomCode = ""
 								a.regRegionLabel = r.Name
-								a.LoadExploreData()
+								a.resetExploreForRegionChange()
 							}
 						}
 					}
