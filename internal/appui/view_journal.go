@@ -1,16 +1,19 @@
 package appui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Darastas/Birdview/internal/model"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/imagepicker"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/mobile"
+	"github.com/egoist/mygo/ui/netimage"
 )
 
 func formatSpeciesOption(tx model.Taxon) string {
@@ -28,12 +31,11 @@ func (a *AppState) rebuildJournalSpeciesOptions() {
 			}
 		}
 	}
-	limit := 2000
 	for _, tx := range a.allTaxa {
 		if seen[tx.SpeciesCode] {
 			continue
 		}
-		if len(opts) >= limit {
+		if len(opts) >= 2000 {
 			break
 		}
 		opts = append(opts, formatSpeciesOption(tx))
@@ -42,19 +44,23 @@ func (a *AppState) rebuildJournalSpeciesOptions() {
 	a.journalSpeciesOpts = opts
 }
 
-func (a *AppState) ensureOptionForSpecies(speciesCode string) string {
-	tx, ok := a.taxonByCode[speciesCode]
-	if !ok {
-		return ""
+func (a *AppState) speciesSuggestions(query string) []model.Taxon {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return nil
 	}
-	label := formatSpeciesOption(tx)
-	for _, opt := range a.journalSpeciesOpts {
-		if opt == label {
-			return label
+	out := make([]model.Taxon, 0, 6)
+	for _, tx := range a.allTaxa {
+		if strings.Contains(strings.ToLower(tx.ComName), q) ||
+			strings.Contains(strings.ToLower(tx.SciName), q) ||
+			strings.Contains(strings.ToLower(tx.SpeciesCode), q) {
+			out = append(out, tx)
+			if len(out) >= 6 {
+				break
+			}
 		}
 	}
-	a.journalSpeciesOpts = append([]string{label}, a.journalSpeciesOpts...)
-	return label
+	return out
 }
 
 func (a *AppState) resolveDraftSpecies() (code, comName, sciName, order, family string) {
@@ -62,73 +68,73 @@ func (a *AppState) resolveDraftSpecies() (code, comName, sciName, order, family 
 	if raw == "" {
 		return "", "", "", "", ""
 	}
-	// 解析格式 "普通翠鸟 (Alcedo atthis) [comkin1]"
 	if lb := strings.LastIndex(raw, "["); lb >= 0 && strings.HasSuffix(raw, "]") {
 		c := strings.TrimSpace(raw[lb+1 : len(raw)-1])
 		if tx, ok := a.taxonByCode[c]; ok {
-			return tx.SpeciesCode, tx.ComName, tx.SciName, tx.Order, tx.FamilyComName
+			return tx.SpeciesCode, tx.ComName, tx.SciName, model.OrderZh(tx.Order), model.FamilyZh(tx.FamilySciName, tx.FamilyComName)
 		}
 	}
-	// 按中文名、学名或代码精确/包含匹配
 	lower := strings.ToLower(raw)
 	for _, tx := range a.allTaxa {
 		if strings.EqualFold(tx.SpeciesCode, raw) || strings.EqualFold(tx.ComName, raw) || strings.EqualFold(tx.SciName, raw) {
-			return tx.SpeciesCode, tx.ComName, tx.SciName, tx.Order, tx.FamilyComName
+			return tx.SpeciesCode, tx.ComName, tx.SciName, model.OrderZh(tx.Order), model.FamilyZh(tx.FamilySciName, tx.FamilyComName)
 		}
 	}
 	for _, tx := range a.allTaxa {
 		if strings.Contains(strings.ToLower(tx.ComName), lower) || strings.Contains(strings.ToLower(tx.SciName), lower) {
-			return tx.SpeciesCode, tx.ComName, tx.SciName, tx.Order, tx.FamilyComName
+			return tx.SpeciesCode, tx.ComName, tx.SciName, model.OrderZh(tx.Order), model.FamilyZh(tx.FamilySciName, tx.FamilyComName)
 		}
 	}
-	// 离线手输兜底：用输入文本作为鸟种名
 	slug := strings.ReplaceAll(lower, " ", "_")
 	return "custom_" + slug, raw, raw, "", ""
 }
 
-// OpenNewJournalModal 打开新建观鸟日志弹窗（可预填鸟种代码与观测地点）。
+// OpenNewJournalModal 打开新建观鸟日志底部抽屉并预填鸟种与地点。
 func (a *AppState) OpenNewJournalModal(speciesCode, location string) {
-	a.page = "journal"
 	a.jEditID = ""
 	a.jDraftSpecies = ""
 	if speciesCode != "" {
-		if label := a.ensureOptionForSpecies(speciesCode); label != "" {
-			a.jDraftSpecies = label
+		if tx, ok := a.taxonByCode[speciesCode]; ok {
+			a.jDraftSpecies = formatSpeciesOption(tx)
 		} else {
 			a.jDraftSpecies = speciesCode
 		}
 	}
 	a.jDraftObservedAt = time.Now().Format("2006-01-02 15:04")
 	a.jDraftLocation = location
-	a.jDraftCount = "1"
+	a.jDraftLat = 0
+	a.jDraftLng = 0
+	a.jDraftCount = 1
 	a.jDraftNotes = ""
 	a.jDraftPhotos = nil
 	a.jDraftAudio = ""
 	a.jDraftError = ""
-	a.journalModalOpen = true
+	a.journalSheetOpen = true
 	a.invalidateUI()
 }
 
 func (a *AppState) openEditJournalModal(e model.JournalEntry) {
 	a.jEditID = e.ID
-	if label := a.ensureOptionForSpecies(e.SpeciesCode); label != "" {
-		a.jDraftSpecies = label
+	if tx, ok := a.taxonByCode[e.SpeciesCode]; ok {
+		a.jDraftSpecies = formatSpeciesOption(tx)
 	} else {
 		a.jDraftSpecies = e.ComName
 	}
 	a.jDraftObservedAt = e.ObservedAt
 	a.jDraftLocation = e.Location
-	a.jDraftCount = strconv.Itoa(max(1, e.Count))
+	a.jDraftLat = e.Lat
+	a.jDraftLng = e.Lng
+	a.jDraftCount = max(1, e.Count)
 	a.jDraftNotes = e.Notes
 	a.jDraftPhotos = append([]string(nil), e.PhotoPaths...)
 	a.jDraftAudio = e.AudioPath
 	a.jDraftError = ""
-	a.journalModalOpen = true
+	a.journalSheetOpen = true
 }
 
 func (a *AppState) refreshJournalList() {
 	entries := a.store.Entries()
-	q := strings.ToLower(strings.TrimSpace(a.journalQuery))
+	q := strings.ToLower(strings.TrimSpace(a.session.JournalQuery))
 	out := make([]model.JournalEntry, 0, len(entries))
 	for _, e := range entries {
 		if q != "" {
@@ -143,513 +149,769 @@ func (a *AppState) refreshJournalList() {
 		out = append(out, e)
 	}
 	a.filteredEntries = out
-	a.journalSelected = -1
-	for i, e := range out {
-		if e.ID == a.journalActiveID {
-			a.journalSelected = i
-			break
-		}
-	}
-	if a.journalSelected < 0 && len(out) > 0 {
-		a.journalSelected = 0
-		a.journalActiveID = out[0].ID
-		a.journalPhotoIndex = 0
-	}
-	if len(out) == 0 {
-		a.journalActiveID = ""
-	}
 }
 
-func (a *AppState) viewJournal(c *ui.Context, t *ui.Theme) {
-	ui.Split(c, &a.journalSplit,
-		func() { a.viewJournalListPane(c, t) },
-		func() { a.viewJournalDetailPane(c, t) },
-	).SplitReset(380).Fill()
-}
+func (a *AppState) viewJournalHome(c *ui.Context, t *ui.Theme) {
+	unlocked := a.store.UnlockedBirds()
+	entries := a.store.Entries()
+	chinaTotal := len(a.chinaCodes)
+	if chinaTotal == 0 {
+		chinaTotal = 1469
+	}
+	progress := float64(len(unlocked)) / float64(chinaTotal)
+	if progress > 1 {
+		progress = 1
+	}
+	familyCount := make(map[string]int)
+	for _, u := range unlocked {
+		familyCount[fallbackText(u.FamilyName, "未分类")]++
+	}
 
-func (a *AppState) viewJournalListPane(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Fill().Children(func() {
-		ui.Column(c).Padding(14, 14, 10, 14).Gap(10).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "观鸟日志").FontSize(17).Bold()
-				if ui.PrimaryButton(c.Key("j-new-btn"), "").Children(func() {
-					ui.Icon(c, iconPlus).FontSize(14)
-					ui.Text(c, "新建记录").SingleLine()
-				}).Clicked() {
-					a.OpenNewJournalModal("", "")
-				}
-			})
-
-			if ui.SearchField(c.Key("j-search"), &a.journalQuery).
-				Placeholder("筛选鸟种、地点或文字记录…").Label("筛选日志").Changed() {
-				a.refreshJournalList()
-			}
-
-			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-				ui.Textf(c, "共 %d 条记录 · 已解锁 %d 种", len(a.filteredEntries), len(a.store.UnlockedBirds())).
-					FontSize(12).TextColor(t.TextMuted)
-				ui.Row(c).Gap(6).Children(func() {
-					if ui.Button(c.Key("j-export-csv"), "导出 CSV").Clicked() {
-						a.ExportJournalDialog("csv")
+	ui.Box(c).Fill().Children(func() {
+		ui.Column(c).Fill().Children(func() {
+			// 顶部标题与个人解锁成就概览卡片
+			ui.Column(c).FillWidth().Padding(12, 16, 10, 16).Gap(10).Children(func() {
+				ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "观鸟日志").FontSize(26).Bold().Role(ui.RoleHeading).Level(1)
+					shareBtn := ui.Row(c.Key("j-export-btn")).Height(34).PaddingX(12).Radius(17).
+						Background(t.Surface).Gap(5).AlignItems(ui.Center).Role(ui.RoleButton).Label("分享或导出")
+					if !t.Dark {
+						shareBtn.Shadow(0, 1, 4, 0, ui.RGBA(15, 23, 42, 0.06))
 					}
-					if ui.Button(c.Key("j-export-json"), "导出 JSON").Clicked() {
-						a.ExportJournalDialog("json")
+					shareBtn.Children(func() {
+						ui.Icon(c, iconShare).FontSize(13).TextColor(t.Text)
+						ui.Text(c, "导出/分享").FontSize(12.5).FontWeight(600)
+					})
+					if shareBtn.Clicked() {
+						a.exportSheetOpen = true
 					}
 				})
+
+				// 简洁成就进度条卡片
+				elevatedCard(c, t).Padding(14, 16).Gap(8).Children(func() {
+					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.End).Children(func() {
+						ui.Row(c).Gap(6).AlignItems(ui.Baseline).Children(func() {
+							ui.Textf(c, "%d", len(unlocked)).FontSize(26).Bold().TextColor(t.Accent).FontFeatures("tnum")
+							ui.Textf(c, "/ %d 种已解锁", chinaTotal).FontSize(13).TextColor(t.TextMuted).FontFeatures("tnum")
+						})
+						ui.Textf(c, "%d 条日志 · %d 科", len(entries), len(familyCount)).FontSize(12).TextColor(t.TextMuted)
+					})
+					ui.Progress(c, progress).Label("个人鸟种解锁进度").FillWidth()
+				})
+
+				segmentedPillStrip(c, "j-subtab", &a.session.JournalSubTab, t, "时间线日志", "已解锁图谱")
 			})
+
+			if a.session.JournalSubTab == 0 {
+				a.buildJournalTimeline(c, t)
+			} else {
+				a.buildLifelistGrid(c, t, unlocked)
+			}
 		})
 
-		a.journalList.Key = func(i int) any { return a.filteredEntries[i].ID }
-		a.journalList.Label = func(i int) string { return a.filteredEntries[i].ComName }
-		a.journalList.Selected = &a.journalSelected
-
-		list := ui.List(c.Key("j-list"), &a.journalList, len(a.filteredEntries)).Grow(1).FillWidth()
-		list.Rows(func(row ui.ListRow) {
-			e := a.filteredEntries[row.Index]
-			rc := row.Context
-			bg := ui.Transparent
-			switch {
-			case row.Selected():
-				bg = t.Accent
-			case row.Pressed():
-				bg = t.SurfacePressed
-			case row.Hovered():
-				bg = t.SurfaceHover
+		// 右下角新建观鸟日志悬浮主按钮（录音/弹窗开启时不重叠）
+		if !a.journalSheetOpen {
+			fab := mobile.FloatingButton(c.Key("j-fab"), "新建观鸟日志", paintIconPlus).
+				Absolute().Right(16).Bottom(16)
+			if fab.Clicked() {
+				a.OpenNewJournalModal("", "")
 			}
-			textColor := t.Text
-			mutedColor := t.TextMuted
-			if row.Selected() {
-				textColor = t.AccentText
-				mutedColor = t.AccentText.Alpha(0.85)
-			}
+		}
+	})
+}
 
-			ui.Column(rc).Padding(10, 14).Gap(4).Background(bg).Children(func() {
-				ui.Row(rc).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(8).Children(func() {
-					ui.Text(rc, e.ComName).Bold().TextColor(textColor).SingleLine().Grow(1)
-					ui.Textf(rc, "%d 只", max(1, e.Count)).FontSize(11.5).TextColor(mutedColor)
-				})
-				loc := fallbackText(e.Location, "未填地点")
-				ui.Textf(rc, "%s · %s", e.ObservedAt, loc).FontSize(11.5).TextColor(mutedColor).SingleLine()
+func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
+	ui.Box(c).Padding(0, 16, 8, 16).Children(func() {
+		if ui.SearchField(c.Key("j-search"), &a.session.JournalQuery).
+			Placeholder("搜索鸟种、地点或观察笔记…").Label("搜索日志").
+			FillWidth().Height(38).Radius(10).Changed() {
+			a.refreshJournalList()
+		}
+	})
 
-				if len(e.PhotoPaths) > 0 || e.AudioPath != "" {
-					ui.Row(rc).Gap(6).Children(func() {
-						if len(e.PhotoPaths) > 0 {
-							b := ui.Badge(rc, fmt.Sprintf("%d 张照片", len(e.PhotoPaths)))
-							if row.Selected() {
-								b.Background(ui.RGBA(255, 255, 255, 0.2)).TextColor(t.AccentText)
-							}
-						}
-						if e.AudioPath != "" {
-							b := ui.Badge(rc, "含现场录音")
-							if row.Selected() {
-								b.Background(ui.RGBA(255, 255, 255, 0.2)).TextColor(t.AccentText)
-							}
-						}
-					})
-				}
-			})
-		}).Children(func() {
+	scroll := ui.Scroll(c.Key("j-timeline-scroll")).Grow(1).Basis(0).FillWidth()
+	if scroll.PullToRefresh(&a.journalRefresh) {
+		a.refreshJournalList()
+		a.journalRefresh.Refreshing = false
+	}
+	scroll.Children(func() {
+		ui.Column(c).FillWidth().Padding(2, 16, 88, 16).Gap(10).Children(func() {
 			if len(a.filteredEntries) == 0 {
-				ui.Column(c).Fill().Center().Padding(24).Gap(10).Children(func() {
-					ui.Icon(c, iconJournal).FontSize(28).TextColor(t.TextMuted)
-					ui.Text(c, "暂无观鸟记录").Bold()
-					ui.Text(c, "记录今天看到的鸟种，首次记录会自动解锁该鸟种").FontSize(12.5).TextColor(t.TextMuted)
-					if ui.PrimaryButton(c.Key("j-empty-add"), "写第一条日志").Clicked() {
-						a.OpenNewJournalModal("", "")
+				elevatedCard(c, t).Padding(28).Center().Gap(8).Children(func() {
+					ui.Icon(c, iconJournal).FontSize(32).TextColor(t.TextMuted.Alpha(0.6))
+					ui.Text(c, "暂无观鸟日志").FontSize(16).FontWeight(600)
+					ui.Text(c, "点击右下角 + 记录今天的目击并点亮图鉴鸟种").FontSize(13).TextColor(t.TextMuted)
+				})
+				return
+			}
+
+			for i, item := range a.filteredEntries {
+				entry := item
+				ui.Box(c.Key("jsw-"+entry.ID)).Radius(16).Clip().Children(func() {
+					mobile.SwipeRow(c, nil, mobile.SwipeOptions{
+						Trailing: []mobile.SwipeAction{{
+							Label:       "删除",
+							Destructive: true,
+							OnTap: func() {
+								a.jDeleteTargetID = entry.ID
+								a.jDeleteConfirm = true
+							},
+						}},
+					}, func() {
+						card := elevatedRowCard(c, t).Padding(12, 14).Gap(12).AlignItems(ui.Center).
+							Role(ui.RoleButton).Label(entry.ComName + " 日志详情")
+						card.Children(func() {
+							// 左侧用户自拍照片缩略图或无图图标块
+							if len(entry.PhotoPaths) > 0 {
+								p := entry.PhotoPaths[0]
+								a.loadLocalImageAsync(p)
+								if src, ok := a.localImgCache[p]; ok {
+									ui.Image(c, src).Size(64, 64).Fit(ui.Cover).Radius(12).Shrink(0).Label(entry.ComName)
+								} else {
+									ui.Box(c).Size(64, 64).Radius(12).Background(softPillColor(t)).Center().Shrink(0).Children(func() {
+										ui.Icon(c, iconImage).FontSize(22).TextColor(t.TextMuted.Alpha(0.6))
+									})
+								}
+							}
+
+							ui.Column(c).Grow(1).Basis(0).Gap(4).Children(func() {
+								ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(8).Children(func() {
+									ui.Text(c, entry.ComName).FontSize(16).FontWeight(600).SingleLine().Grow(1)
+									statusPill(c, fmt.Sprintf("%d 只", max(1, entry.Count)), softPillColor(t), secondaryTextColor(t))
+								})
+								ui.Textf(c, "%s · %s", model.FormatObsTime(entry.ObservedAt), fallbackText(entry.Location, "野外地点")).
+									FontSize(12.5).TextColor(t.TextMuted).SingleLine()
+
+								if strings.TrimSpace(entry.Notes) != "" {
+									ui.Text(c, entry.Notes).FontSize(13).TextColor(secondaryTextColor(t)).MaxLines(2)
+								}
+
+								if entry.AudioPath != "" || len(entry.PhotoPaths) > 1 {
+									ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+										if entry.AudioPath != "" {
+											pst := a.player.Status()
+											isThis := pst.SourceKey == entry.AudioPath
+											label := "播放现场录音"
+											if isThis && pst.Playing {
+												label = "暂停录音"
+											}
+											playPill := ui.Row(c.Key(fmt.Sprintf("jt-aud-%d", i))).Padding(3, 10).Radius(999).
+												Background(t.Accent.Alpha(0.12)).Gap(4).AlignItems(ui.Center).Role(ui.RoleButton).Label(label)
+											playPill.Children(func() {
+												ic := iconPlay
+												if isThis && pst.Playing {
+													ic = iconPause
+												}
+												ui.Icon(c, ic).FontSize(10).TextColor(t.Accent)
+												ui.Text(c, label).FontSize(11.5).FontWeight(600).TextColor(t.Accent)
+											})
+											if playPill.Clicked() {
+												if isThis && pst.Active {
+													a.player.TogglePause()
+												} else {
+													a.player.PlayFile(entry.AudioPath, entry.ComName+" · 现场录音", model.FormatObsTime(entry.ObservedAt), func() {
+														a.updateUI(func() {})
+													})
+												}
+											}
+										}
+										if len(entry.PhotoPaths) > 1 {
+											statusPill(c, fmt.Sprintf("%d 张照片", len(entry.PhotoPaths)), softPillColor(t), t.TextMuted)
+										}
+									})
+								}
+							})
+
+							ui.Icon(c, iconChevronRight).FontSize(16).TextColor(t.TextMuted.Alpha(0.5))
+						})
+						if card.Clicked() {
+							copyE := entry
+							a.journalActiveEntry = &copyE
+							a.journalDetailPager.Page = 0
+							a.router.Push("/journal/" + entry.ID)
+						}
+					})
+				})
+			}
+		})
+	})
+}
+
+func (a *AppState) buildLifelistGrid(c *ui.Context, t *ui.Theme, unlocked []model.UnlockedBird) {
+	ui.Box(c).Padding(0, 16, 8, 16).Children(func() {
+		ui.SearchField(c.Key("ll-search"), &a.session.LifelistFilter).
+			Placeholder("搜索已解锁鸟种或发现地…").Label("搜索已解锁").
+			FillWidth().Height(38).Radius(10)
+	})
+
+	q := strings.ToLower(strings.TrimSpace(a.session.LifelistFilter))
+	var visible []model.UnlockedBird
+	for _, u := range unlocked {
+		if q == "" || strings.Contains(strings.ToLower(u.ComName), q) ||
+			strings.Contains(strings.ToLower(u.SciName), q) ||
+			strings.Contains(strings.ToLower(u.FirstLocation), q) {
+			visible = append(visible, u)
+		}
+	}
+
+	ui.Scroll(c.Key("ll-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
+		ui.Column(c).FillWidth().Padding(2, 16, 88, 16).Gap(12).Children(func() {
+			if len(visible) == 0 {
+				elevatedCard(c, t).Padding(28).Center().Gap(8).Children(func() {
+					ui.Icon(c, iconAward).FontSize(32).TextColor(t.TextMuted.Alpha(0.6))
+					ui.Text(c, "尚未解锁鸟种").FontSize(16).FontWeight(600)
+					ui.Text(c, "新建一条观鸟日志即可在此永久点亮对应物种").FontSize(13).TextColor(t.TextMuted)
+				})
+				return
+			}
+
+			for i := 0; i < len(visible); i += 2 {
+				rowIdx := i
+				ui.Row(c.Key(fmt.Sprintf("llrow-%d", rowIdx))).FillWidth().Gap(10).Children(func() {
+					for col := 0; col < 2; col++ {
+						idx := rowIdx + col
+						if idx >= len(visible) {
+							ui.Box(c).Grow(1).Basis(0)
+							continue
+						}
+						bird := visible[idx]
+						card := elevatedCard(c.Key("llcard-"+bird.SpeciesCode), t).Grow(1).Basis(0).Clip().
+							Role(ui.RoleButton).Label(bird.ComName)
+						card.Children(func() {
+							ui.Box(c).FillWidth().Height(112).Background(softPillColor(t)).Children(func() {
+								if bird.CoverPhotoPath != "" {
+									a.loadLocalImageAsync(bird.CoverPhotoPath)
+									if src, ok := a.localImgCache[bird.CoverPhotoPath]; ok {
+										ui.Image(c, src).Fill().Fit(ui.Cover).Label(bird.ComName)
+									} else {
+										ui.Box(c).Fill().Center().Children(func() {
+											ui.Icon(c, iconImage).FontSize(22).TextColor(t.TextMuted.Alpha(0.6))
+										})
+									}
+								} else if thumbURL := a.speciesThumbURL(bird.SpeciesCode); thumbURL != "" {
+									netimage.Image(c, thumbURL, netimage.Options{
+										MaxSide:     320,
+										Fit:         ui.Cover,
+										Placeholder: softPillColor(t),
+									}).Fill()
+								} else {
+									ui.Box(c).Fill().Center().Children(func() {
+										ui.Icon(c, iconAward).FontSize(28).TextColor(t.Accent.Alpha(0.7))
+									})
+								}
+								ui.Textf(c, "%d 次", max(1, bird.TotalSightings)).
+									Absolute().Right(8).Bottom(8).Padding(2, 8).Radius(999).
+									FontSize(11).FontWeight(600).
+									Background(ui.RGBA(15, 23, 42, 0.58)).TextColor(ui.RGB(255, 255, 255))
+							})
+
+							ui.Column(c).FillWidth().Padding(10, 12).Gap(2).Children(func() {
+								ui.Text(c, bird.ComName).FontSize(15).FontWeight(600).SingleLine()
+								fam := bird.FamilyName
+								if tx, ok := a.taxonByCode[bird.SpeciesCode]; ok {
+									fam = model.FamilyZh(tx.FamilySciName, tx.FamilyComName)
+								}
+								ui.Text(c, fallbackText(fam, bird.FirstLocation)).FontSize(12).TextColor(t.TextMuted).SingleLine()
+							})
+						})
+						if card.Clicked() {
+							if _, ok := a.taxonByCode[bird.SpeciesCode]; ok {
+								a.OpenSpeciesInGuide(bird.SpeciesCode)
+							} else {
+								a.session.JournalQuery = bird.ComName
+								a.session.JournalSubTab = 0
+								a.refreshJournalList()
+							}
+						}
 					}
 				})
 			}
 		})
-
-		if list.Changed() && a.journalSelected >= 0 && a.journalSelected < len(a.filteredEntries) {
-			a.journalActiveID = a.filteredEntries[a.journalSelected].ID
-			a.journalPhotoIndex = 0
-		}
 	})
 }
 
-func (a *AppState) viewJournalDetailPane(c *ui.Context, t *ui.Theme) {
-	if a.journalActiveID == "" {
-		ui.Column(c).Fill().Center().Gap(8).Padding(32).Children(func() {
-			ui.Icon(c, iconJournal).FontSize(32).TextColor(t.TextMuted)
-			ui.Text(c, "选择一条观鸟日志查看详情").FontSize(15).Bold()
-			ui.Text(c, "可上传个人摄影图片、用麦克风录制鸟鸣并自动累计解锁鸟种").FontSize(12.5).TextColor(t.TextMuted)
-		})
-		return
-	}
-
-	var cur *model.JournalEntry
+func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID string) {
+	var entry *model.JournalEntry
 	for i := range a.filteredEntries {
-		if a.filteredEntries[i].ID == a.journalActiveID {
-			cur = &a.filteredEntries[i]
+		if a.filteredEntries[i].ID == entryID {
+			copyE := a.filteredEntries[i]
+			entry = &copyE
 			break
 		}
 	}
-	if cur == nil {
+	if entry == nil {
+		for _, e := range a.store.Entries() {
+			if e.ID == entryID {
+				copyE := e
+				entry = &copyE
+				break
+			}
+		}
+	}
+	if entry == nil {
+		ui.Column(c).Fill().Center().Padding(24).Gap(12).Children(func() {
+			ui.Text(c, "该观鸟日志已被删除")
+			if ui.Button(c.Key("jd-nf-back"), "返回日志列表").Clicked() {
+				a.goBack()
+			}
+		})
 		return
 	}
-	entry := *cur
 
-	ui.Scroll(c.Key("j-detail-scroll")).Fill().Padding(20).Gap(16).Children(func() {
-		ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Start).Gap(12).Children(func() {
-			ui.Column(c).Grow(1).Gap(4).Children(func() {
-				ui.Text(c, entry.ComName).FontSize(22).Bold()
-				ui.Text(c, entry.SciName).Italic().FontSize(14).TextColor(t.TextMuted)
-			})
-			ui.Row(c).Gap(8).Children(func() {
-				if _, ok := a.taxonByCode[entry.SpeciesCode]; ok {
-					if ui.Button(c.Key("j-goto-guide"), "前往图鉴").Clicked() {
-						a.OpenSpeciesInGuide(entry.SpeciesCode)
-					}
-				}
-				if ui.Button(c.Key("j-edit-btn"), "编辑").Clicked() {
-					a.openEditJournalModal(entry)
-				}
-				if ui.Button(c.Key("j-del-btn"), "删除").TextColor(t.Danger).Clicked() {
-					a.jDeleteTargetID = entry.ID
-					a.jDeleteConfirm = true
-				}
-			})
-		})
-
-		ui.Row(c).Gap(8).Wrap().Children(func() {
-			infoChip(c, t, "观测时间", entry.ObservedAt)
-			infoChip(c, t, "地点", fallbackText(entry.Location, "未填写"))
-			infoChip(c, t, "数量", fmt.Sprintf("%d 只", max(1, entry.Count)))
-			if entry.FamilyName != "" {
-				infoChip(c, t, "科", entry.FamilyName)
+	ui.Column(c).Fill().Background(t.Background).Children(func() {
+		ui.Row(c).FillWidth().Padding(10, 16, 8, 16).Gap(8).AlignItems(ui.Center).Children(func() {
+			if circleIconBtn(c, "jd-back-btn", "返回", iconBack, t.Surface, t.Text, 38).Clicked() {
+				a.goBack()
+			}
+			ui.Text(c, entry.ComName).FontSize(17).FontWeight(600).SingleLine().Grow(1)
+			if filterPill(c, "jd-edit", "编辑", false, t).Clicked() {
+				a.openEditJournalModal(*entry)
+			}
+			if circleIconBtn(c, "jd-del", "删除日志", iconTrash, t.Danger.Alpha(0.12), t.Danger, 36).Clicked() {
+				a.jDeleteTargetID = entry.ID
+				a.jDeleteConfirm = true
 			}
 		})
 
-		// 用户自己上传的照片画廊
-		ui.Column(c).FillWidth().Padding(14).Gap(10).Radius(t.Radius).Background(t.Surface).Border(1, t.Border).Children(func() {
-			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "个人观测照片").Bold()
-				ui.Textf(c, "%d 张", len(entry.PhotoPaths)).FontSize(12).TextColor(t.TextMuted)
-			})
-			if len(entry.PhotoPaths) == 0 {
-				ui.Text(c, "本条记录未附加照片，点击右上角「编辑」可补充图片。").FontSize(12.5).TextColor(t.TextMuted)
-			} else {
-				if a.journalPhotoIndex >= len(entry.PhotoPaths) {
-					a.journalPhotoIndex = 0
-				}
-				p := entry.PhotoPaths[a.journalPhotoIndex]
-				imgKey := "local:" + p
-				a.loadImageAsync(imgKey, p, true)
-				if src, ok := a.imgCache[imgKey]; ok {
-					ui.Image(c, src).FillWidth().Height(280).Fit(ui.Contain).Radius(8).Background(t.Background).Label(entry.ComName)
-				} else if errMsg := a.imgErr[imgKey]; errMsg != "" {
-					ui.Textf(c, "照片读取失败: %s", errMsg).FontSize(12).TextColor(t.Danger)
-				} else {
-					ui.Box(c).FillWidth().Height(200).Center().Radius(8).Background(t.Background).Children(func() {
-						ui.Spinner(c).Label("读取照片中")
-					})
-				}
-
-				if len(entry.PhotoPaths) > 1 {
-					ui.Row(c).Gap(6).Wrap().Children(func() {
-						for i := range entry.PhotoPaths {
-							btn := ui.Button(c.Key(fmt.Sprintf("j-p-%d", i)), fmt.Sprintf("照片 %d", i+1))
-							if i == a.journalPhotoIndex {
-								btn.Background(t.Accent).TextColor(t.AccentText)
-							}
-							if btn.Clicked() {
-								a.journalPhotoIndex = i
-							}
-						}
-					})
-				}
-			}
-		})
-
-		// 用户自己录制/上传的录音
-		ui.Column(c).FillWidth().Padding(14).Gap(10).Radius(t.Radius).Background(t.Surface).Border(1, t.Border).Children(func() {
-			ui.Text(c, "个人现场录音").Bold()
-			if entry.AudioPath == "" {
-				ui.Text(c, "本条记录未附带现场录音。").FontSize(12.5).TextColor(t.TextMuted)
-			} else {
-				st := a.player.Status()
-				isThis := st.SourceKey == entry.AudioPath
-				ui.Row(c).FillWidth().Padding(10, 12).Gap(10).AlignItems(ui.Center).Radius(8).Background(t.Background).Children(func() {
-					btnIcon := iconPlay
-					btnLabel := "播放录音"
-					if isThis && st.Playing {
-						btnIcon = iconPause
-						btnLabel = "暂停录音"
-					}
-					if ui.Button(c.Key("j-play-audio"), "").Label(btnLabel).Children(func() {
-						ui.Icon(c, btnIcon).FontSize(13)
-					}).Clicked() {
-						if isThis && st.Active {
-							a.player.TogglePause()
-						} else {
-							a.player.PlayFile(entry.AudioPath, entry.ComName+" · 个人录音", entry.ObservedAt, func() {
-								a.updateUI(func() {})
+		ui.Scroll(c.Key("jd-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
+			ui.Column(c).FillWidth().Padding(0, 0, 28, 0).Gap(14).Children(func() {
+				if len(entry.PhotoPaths) > 0 {
+					count := len(entry.PhotoPaths)
+					ui.Box(c).FillWidth().Height(260).Background(softPillColor(t)).Children(func() {
+						mobile.PageView(c, &a.journalDetailPager, count, func(i int) {
+							p := entry.PhotoPaths[i]
+							a.loadLocalImageAsync(p)
+							slide := ui.Box(c.Key(fmt.Sprintf("jpslide-%d", i))).Fill().
+								Role(ui.RoleButton).Label("放大查看个人照片")
+							slide.Children(func() {
+								if src, ok := a.localImgCache[p]; ok {
+									ui.Image(c, src).Fill().Fit(ui.Cover).Label(entry.ComName)
+								} else {
+									ui.Box(c).Fill().Center().Children(func() {
+										ui.Spinner(c).Label("读取照片")
+									})
+								}
 							})
-						}
+							if slide.Clicked() {
+								a.openLocalPhotosViewer(entry.ComName+" · 我的记录", entry.PhotoPaths, i)
+							}
+						}).Fill()
+						ui.Textf(c, "%d / %d", a.journalDetailPager.Page+1, count).
+							Absolute().Right(12).Bottom(12).Padding(4, 10).Radius(999).
+							FontSize(11.5).FontWeight(600).
+							Background(ui.RGBA(15, 23, 42, 0.58)).TextColor(ui.RGB(255, 255, 255))
+					})
+					if count > 1 {
+						mobile.PageDots(c, a.journalDetailPager.Page, count)
 					}
-					ui.Column(c).Grow(1).Gap(2).Children(func() {
-						ui.Text(c, filepath.Base(entry.AudioPath)).Bold().FontSize(13).SingleLine()
-						ui.Text(c, "本地保存的观鸟现场录音").FontSize(11.5).TextColor(t.TextMuted)
+				}
+
+				ui.Box(c).PaddingX(16).Children(func() {
+					elevatedCard(c, t).Padding(16).Gap(8).Children(func() {
+						ui.Text(c, entry.ComName).FontSize(22).Bold()
+						ui.Text(c, entry.SciName).Italic().FontSize(14).TextColor(t.TextMuted)
+						ui.Row(c).Gap(8).Wrap().Children(func() {
+							statusPill(c, model.FormatObsTime(entry.ObservedAt), softPillColor(t), secondaryTextColor(t))
+							statusPill(c, fallbackText(entry.Location, "未填地点"), softPillColor(t), secondaryTextColor(t))
+							statusPill(c, fmt.Sprintf("%d 只", max(1, entry.Count)), t.Accent.Alpha(0.12), t.Accent)
+						})
 					})
 				})
-			}
-		})
 
-		// 文字观察记录
-		ui.Column(c).FillWidth().Padding(14).Gap(8).Radius(t.Radius).Background(t.Surface).Border(1, t.Border).Selectable().Children(func() {
-			ui.Text(c, "观察笔记").Bold()
-			if strings.TrimSpace(entry.Notes) != "" {
-				ui.Text(c, entry.Notes).LineHeight(1.6)
-			} else {
-				ui.Text(c, "暂无文字观察笔记。").FontSize(12.5).TextColor(t.TextMuted)
-			}
+				if entry.AudioPath != "" {
+					ui.Box(c).PaddingX(16).Children(func() {
+						pst := a.player.Status()
+						isThis := pst.SourceKey == entry.AudioPath
+						elevatedRowCard(c, t).Padding(14).Gap(12).AlignItems(ui.Center).Children(func() {
+							ic := iconPlay
+							lbl := "播放个人录音"
+							if isThis && pst.Playing {
+								ic = iconPause
+								lbl = "暂停录音"
+							}
+							if circleIconBtn(c, "jd-aud-play", lbl, ic, t.Accent, t.AccentText, 42).Clicked() {
+								if isThis && pst.Active {
+									a.player.TogglePause()
+								} else {
+									a.player.PlayFile(entry.AudioPath, entry.ComName+" · 个人录音", model.FormatObsTime(entry.ObservedAt), func() {
+										a.updateUI(func() {})
+									})
+								}
+							}
+							ui.Column(c).Grow(1).Gap(2).Children(func() {
+								ui.Text(c, "现场鸟鸣录音").FontSize(15).FontWeight(600)
+								ui.Text(c, filepath.Base(entry.AudioPath)).FontSize(12).TextColor(t.TextMuted).SingleLine()
+							})
+						})
+					})
+				}
+
+				ui.Box(c).PaddingX(16).Children(func() {
+					elevatedCard(c, t).Padding(16).Gap(8).Selectable().Children(func() {
+						ui.Text(c, "观察笔记").FontSize(15).FontWeight(600)
+						if strings.TrimSpace(entry.Notes) != "" {
+							ui.Text(c, entry.Notes).FontSize(14.5).LineHeight(1.6)
+						} else {
+							ui.Text(c, "本次观测未填写文字笔记。").FontSize(13).TextColor(t.TextMuted)
+						}
+					})
+				})
+
+				if _, ok := a.taxonByCode[entry.SpeciesCode]; ok {
+					ui.Box(c).PaddingX(16).Children(func() {
+						if ui.Button(c.Key("jd-goto-guide"), "查看图鉴详情 ↗").FillWidth().Height(44).Radius(22).Clicked() {
+							a.OpenSpeciesInGuide(entry.SpeciesCode)
+						}
+					})
+				}
+			})
 		})
 	})
 }
 
-func (a *AppState) viewJournalModal(c *ui.Context, t *ui.Theme) {
-	if !a.journalModalOpen {
-		return
-	}
+func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 	recStatus := a.recorder.Status()
 	if recStatus.Recording {
 		c.After(80 * time.Millisecond)
 	}
+	title := "记录观鸟"
+	if a.jEditID != "" {
+		title = "编辑日志"
+	}
 
-	dlg := ui.Modal(c, &a.journalModalOpen, func() {
-		ui.Column(c).Width(620).MaxHeight(680).Gap(12).Children(func() {
-			title := "新建观鸟日志"
-			if a.jEditID != "" {
-				title = "编辑观鸟日志"
-			}
-			ui.Text(c, title).FontSize(18).Bold()
-
-			ui.Scroll(c.Key("j-modal-scroll")).Grow(1).FillWidth().Padding(2, 6, 2, 2).Gap(12).Children(func() {
-				// 鸟种选择
-				ui.Field(c, "鸟种（支持中文名、拉丁学名或代码筛选）", func() {
-					if len(a.journalSpeciesOpts) > 0 {
-						ui.Combobox(c.Key("j-species-combo"), &a.jDraftSpecies, a.journalSpeciesOpts).
-							Placeholder("选择或搜索鸟种…").FillWidth()
-					} else {
-						ui.TextInput(c.Key("j-species-input"), &a.jDraftSpecies).
-							Placeholder("输入鸟种中文名或学名（如：普通翠鸟）").FillWidth()
-					}
-				})
-
-				// 时间 / 地点 / 数量
-				ui.Row(c).Gap(10).FillWidth().Children(func() {
-					ui.Field(c, "观测时间", func() {
-						ui.TextInput(c.Key("j-obs-dt"), &a.jDraftObservedAt).FillWidth()
-					}).Width(170)
-					ui.Field(c, "观测地点", func() {
-						ui.TextInput(c.Key("j-obs-loc"), &a.jDraftLocation).Placeholder("如：北京颐和园西堤").FillWidth()
-					}).Grow(1)
-					ui.Field(c, "数量", func() {
-						ui.TextInput(c.Key("j-obs-cnt"), &a.jDraftCount).FillWidth()
-					}).Width(84)
-				})
-
-				// 文字记录
-				ui.Field(c, "文字记录", func() {
-					ui.TextArea(c.Key("j-obs-notes"), &a.jDraftNotes).Height(96).FillWidth()
-				}).Description("可填写生境、羽色特征或行为描述")
-
-				// 照片上传区
-				ui.Column(c).Padding(12).Gap(8).Radius(8).Background(t.Surface).Border(1, t.Border).Children(func() {
-					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, "现场照片").Bold().FontSize(13)
-						if ui.Button(c.Key("j-pick-photos"), "").Children(func() {
-							ui.Icon(c, iconImage).FontSize(14)
-							ui.Text(c, "选择图片…").SingleLine()
-						}).Clicked() {
-							a.pickJournalPhotosAsync()
-						}
-					})
-					if len(a.jDraftPhotos) == 0 {
-						ui.Text(c, "尚未添加图片（支持 PNG / JPG / WebP / BMP）").FontSize(12).TextColor(t.TextMuted)
-					} else {
-						for i, p := range a.jDraftPhotos {
-							idx := i
-							ui.Row(c.Key(fmt.Sprintf("j-draft-p-%d", i))).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-								ui.Text(c, filepath.Base(p)).FontSize(12.5).SingleLine().Grow(1)
-								ui.Button(c.Key(fmt.Sprintf("j-rm-p-%d", i)), "移除").OnClick(func() {
-									a.jDraftPhotos = append(a.jDraftPhotos[:idx], a.jDraftPhotos[idx+1:]...)
-								})
-							})
-						}
-					}
-				})
-
-				// 现场录音按键 + 导入音频
-				ui.Column(c).Padding(12).Gap(10).Radius(8).Background(t.Surface).Border(1, t.Border).Children(func() {
-					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, "鸟鸣现场录音").Bold().FontSize(13)
-						ui.Row(c).Gap(8).Children(func() {
-							if !recStatus.Recording {
-								recBtn := ui.Button(c.Key("j-rec-start"), "").Children(func() {
-									ui.Icon(c, iconMic).FontSize(14)
-									ui.Text(c, "开始录音").SingleLine()
-								})
-								if recBtn.Clicked() {
-									if err := a.recorder.Start(); err != nil {
-										a.jDraftError = err.Error()
-									} else {
-										a.jDraftError = ""
-									}
-								}
-							} else {
-								stopBtn := ui.PrimaryButton(c.Key("j-rec-stop"), "").Background(t.Danger).Children(func() {
-									ui.Icon(c, iconStop).FontSize(13)
-									ui.Text(c, "停止录音").SingleLine()
-								})
-								if stopBtn.Clicked() {
-									dst := filepath.Join(a.store.DataDir(), "journal", "media", fmt.Sprintf("rec_%d.wav", time.Now().UnixMilli()))
-									if err := a.recorder.Stop(dst); err != nil {
-										a.jDraftError = err.Error()
-									} else {
-										a.jDraftAudio = dst
-										a.jDraftError = ""
-									}
-								}
-							}
-
-							if ui.Button(c.Key("j-pick-audio"), "导入音频…").Disabled(recStatus.Recording).Clicked() {
-								a.pickJournalAudioAsync()
-							}
-						})
-					})
-
-					if recStatus.Recording {
-						ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-							ui.Textf(c, "正在录音 %s", formatDuration(recStatus.Elapsed)).FontSize(12.5).Bold().TextColor(t.Danger)
-							ui.Meter(c, recStatus.Level, 0, 1, &ui.MeterLevels{Warning: 0.75, Critical: 0.92}).
-								Label("录音电平").Grow(1)
-						})
-					} else if a.jDraftAudio != "" {
-						ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-							ui.Textf(c, "已就绪：%s", filepath.Base(a.jDraftAudio)).FontSize(12.5).Grow(1).SingleLine()
-							ui.Row(c).Gap(6).Children(func() {
-								if ui.Button(c.Key("j-preview-audio"), "试听").Clicked() {
-									a.player.PlayFile(a.jDraftAudio, "录音试听", filepath.Base(a.jDraftAudio), func() {
-										a.updateUI(func() {})
-									})
-								}
-								if ui.Button(c.Key("j-clear-audio"), "清除").Clicked() {
-									a.jDraftAudio = ""
-								}
-							})
-						})
-					} else {
-						ui.Text(c, "点击“开始录音”直接通过麦克风录制，或导入 WAV / MP3 / OGG / FLAC / M4A").
-							FontSize(12).TextColor(t.TextMuted)
-					}
-				})
-
-				if a.jDraftError != "" {
-					ui.Text(c, a.jDraftError).FontSize(12.5).TextColor(t.Danger)
-				}
-			})
-
-			ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Children(func() {
+	mobile.Sheet(c, &a.journalSheetOpen, mobile.SheetOptions{
+		Detents:   []float32{0.92},
+		NoDismiss: recStatus.Recording || a.jRecBusy,
+		Label:     title,
+	}, func() {
+		ui.Column(c).Fill().Children(func() {
+			// 表单顶栏：取消 / 标题 / 保存
+			ui.Row(c).FillWidth().Padding(8, 16, 12, 16).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 				if ui.Button(c.Key("j-modal-cancel"), "取消").Clicked() {
 					a.recorder.Cancel()
-					a.journalModalOpen = false
+					a.jRecBusy = false
+					a.journalSheetOpen = false
 				}
-				if ui.PrimaryButton(c.Key("j-modal-save"), "保存记录").Disabled(recStatus.Recording).Clicked() {
+				ui.Text(c, title).FontSize(17).FontWeight(600)
+				if ui.PrimaryButton(c.Key("j-modal-save"), "保存记录").Disabled(recStatus.Recording || a.jRecBusy).Radius(16).Clicked() {
 					a.saveJournalDraft(c)
 				}
 			})
+
+			ui.Scroll(c.Key("j-sheet-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
+				ui.Column(c).FillWidth().Padding(4, 16, 28, 16).Gap(14).Children(func() {
+					// 1. 鸟种输入 + 实时联想选择
+					elevatedCard(c, t).Padding(14).Gap(8).Children(func() {
+						ui.Text(c, "观测鸟种").FontSize(13).FontWeight(600).TextColor(t.TextMuted)
+						ui.TextInput(c.Key("j-species-input"), &a.jDraftSpecies).
+							Placeholder("输入鸟种中文名或拉丁学名（如：普通翠鸟）").
+							Label("鸟种").FillWidth().Height(42)
+
+						suggestions := a.speciesSuggestions(a.jDraftSpecies)
+						// 若已选定为完整 "[code]" 格式则收起联想列表
+						if len(suggestions) > 0 && !strings.HasSuffix(strings.TrimSpace(a.jDraftSpecies), "]") {
+							ui.Row(c).FillWidth().Gap(6).Wrap().Children(func() {
+								for i, tx := range suggestions {
+									item := tx
+									if filterPill(c, fmt.Sprintf("jsug-%d-%s", i, item.SpeciesCode), item.ComName, false, t).Clicked() {
+										a.jDraftSpecies = formatSpeciesOption(item)
+									}
+								}
+							})
+						}
+					})
+
+					// 2. 地点、时间与数量步进器
+					elevatedCard(c, t).Padding(14).Gap(12).Children(func() {
+						ui.Column(c).Gap(6).Children(func() {
+							ui.Text(c, "地点与坐标").FontSize(13).FontWeight(600).TextColor(t.TextMuted)
+							ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+								ui.TextInput(c.Key("j-obs-loc"), &a.jDraftLocation).
+									Placeholder("公园、湿地或坐标").Label("观测地点").Grow(1).Height(42)
+								gpsBtn := ui.Row(c.Key("j-loc-gps")).Size(42, 42).Radius(12).
+									Background(softPillColor(t)).Center().Shrink(0).
+									Role(ui.RoleButton).Label("定位当前位置")
+								gpsBtn.Children(func() {
+									if a.jDraftGPSBusy {
+										ui.Spinner(c).Label("定位")
+									} else {
+										ui.Icon(c, iconLocate).FontSize(17).TextColor(t.Accent)
+									}
+								})
+								if gpsBtn.Clicked() {
+									a.fillGPSLocationAsync("journal")
+								}
+							})
+						})
+
+						ui.Row(c).FillWidth().Gap(12).AlignItems(ui.End).Children(func() {
+							ui.Column(c).Grow(1).Gap(6).Children(func() {
+								ui.Text(c, "观测时间").FontSize(13).FontWeight(600).TextColor(t.TextMuted)
+								ui.TextInput(c.Key("j-obs-dt"), &a.jDraftObservedAt).Label("观测时间").FillWidth().Height(40)
+							})
+
+							ui.Column(c).Gap(6).AlignItems(ui.End).Children(func() {
+								ui.Text(c, "数量").FontSize(13).FontWeight(600).TextColor(t.TextMuted)
+								ui.Row(c).Height(40).Radius(12).Background(softPillColor(t)).AlignItems(ui.Center).Gap(6).PaddingX(6).Children(func() {
+									if circleIconBtn(c, "cnt-dec", "减少数量", iconMinus, t.Surface, t.Text, 28).Clicked() && a.jDraftCount > 1 {
+										a.jDraftCount--
+									}
+									ui.Textf(c, " %d ", max(1, a.jDraftCount)).FontSize(15).FontWeight(600).FontFeatures("tnum")
+									if circleIconBtn(c, "cnt-inc", "增加数量", iconPlus, t.Accent, t.AccentText, 28).Clicked() {
+										a.jDraftCount++
+									}
+								})
+							})
+						})
+					})
+
+					// 3. 现场照片（横向滚动条 + 相册/相机 ActionSheet）
+					elevatedCard(c, t).Padding(14).Gap(10).Children(func() {
+						ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+							ui.Text(c, "现场照片").FontSize(14).FontWeight(600)
+							ui.Textf(c, "%d 张", len(a.jDraftPhotos)).FontSize(12).TextColor(t.TextMuted)
+						})
+
+						ui.ScrollHorizontal(c.Key("j-draft-photos-strip")).FillWidth().Gap(10).Children(func() {
+							addTile := ui.Column(c.Key("j-add-photo-tile")).Size(76, 76).Radius(14).
+								Background(softPillColor(t)).Center().Gap(4).Shrink(0).
+								Role(ui.RoleButton).Label("添加照片")
+							addTile.Children(func() {
+								ui.Icon(c, iconCamera).FontSize(22).TextColor(t.Accent)
+								ui.Text(c, "添加照片").FontSize(11).FontWeight(600).TextColor(t.Accent)
+							})
+							if addTile.Clicked() {
+								a.journalPhotoSheet = true
+							}
+
+							for i, p := range a.jDraftPhotos {
+								idx := i
+								path := p
+								a.loadLocalImageAsync(path)
+								ui.Box(c.Key(fmt.Sprintf("jdp-%d", i))).Size(76, 76).Radius(14).Clip().Shrink(0).Background(softPillColor(t)).Children(func() {
+									if src, ok := a.localImgCache[path]; ok {
+										ui.Image(c, src).Fill().Fit(ui.Cover)
+									}
+									rm := circleIconBtn(c, fmt.Sprintf("jdprm-%d", i), "移除照片", iconClose, ui.RGBA(15, 23, 42, 0.65), ui.RGB(255, 255, 255), 22).
+										Absolute().Top(4).Right(4)
+									if rm.Clicked() {
+										a.jDraftPhotos = append(a.jDraftPhotos[:idx], a.jDraftPhotos[idx+1:]...)
+									}
+								})
+							}
+						})
+					})
+
+					// 4. 鸟鸣现场录音区（大圆形脉冲录音按钮 + 导入音频）
+					elevatedCard(c, t).Padding(14).Gap(12).Children(func() {
+						ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+							ui.Text(c, "现场鸟鸣录音").FontSize(14).FontWeight(600)
+							if ui.Button(c.Key("j-pick-audio"), "导入音频").Disabled(recStatus.Recording || a.jRecBusy).Clicked() {
+								a.pickJournalAudioAsync()
+							}
+						})
+
+						ui.Row(c).FillWidth().Gap(14).AlignItems(ui.Center).Children(func() {
+							if !recStatus.Recording {
+								recCircle := ui.Box(c.Key("j-rec-start")).Size(60, 60).Radius(30).
+									Background(t.Accent).Center().Shrink(0).
+									Role(ui.RoleButton).Label("开始录音")
+								recCircle.Children(func() {
+									ui.Icon(c, iconMic).FontSize(26).TextColor(t.AccentText)
+								})
+								if recCircle.Clicked() && !a.jRecBusy {
+									a.startJournalRecording()
+								}
+
+								ui.Column(c).Grow(1).Gap(2).Children(func() {
+									if a.jDraftAudio != "" {
+										ui.Text(c, "已完成录音："+filepath.Base(a.jDraftAudio)).FontSize(13.5).FontWeight(600).SingleLine()
+										ui.Row(c).Gap(8).Children(func() {
+											if filterPill(c, "j-prev-aud", "试听", true, t).Clicked() {
+												a.player.PlayFile(a.jDraftAudio, "录音试听", filepath.Base(a.jDraftAudio), func() {
+													a.updateUI(func() {})
+												})
+											}
+											if filterPill(c, "j-clr-aud", "移除", false, t).Clicked() {
+												a.jDraftAudio = ""
+											}
+										})
+									} else {
+										ui.Text(c, "点击蓝色麦克风立即录制").FontSize(14).FontWeight(600)
+										ui.Text(c, "或点击右上角导入 WAV / MP3 / OGG / FLAC").FontSize(12).TextColor(t.TextMuted)
+									}
+								})
+							} else {
+								stopCircle := ui.Box(c.Key("j-rec-stop")).Size(60, 60).Radius(30).
+									Background(t.Danger).Center().Shrink(0).
+									Role(ui.RoleButton).Label("停止录音")
+								stopCircle.Children(func() {
+									ui.Icon(c, iconStop).FontSize(24).TextColor(ui.RGB(255, 255, 255))
+								})
+								if stopCircle.Clicked() {
+									a.stopJournalRecording()
+								}
+
+								ui.Column(c).Grow(1).Gap(6).Children(func() {
+									ui.Textf(c, "正在录音 %s", formatDuration(recStatus.Elapsed)).FontSize(15).Bold().TextColor(t.Danger)
+									ui.Meter(c, recStatus.Level, 0, 1, &ui.MeterLevels{Warning: 0.75, Critical: 0.92}).
+										Label("录音电平").FillWidth()
+								})
+							}
+						})
+					})
+
+					// 5. 文字观察笔记
+					elevatedCard(c, t).Padding(14).Gap(6).Children(func() {
+						ui.Text(c, "观察笔记").FontSize(13).FontWeight(600).TextColor(t.TextMuted)
+						ui.TextArea(c.Key("j-obs-notes"), &a.jDraftNotes).
+							Placeholder("记录生境、羽色、鸣叫或行为特征…").
+							Label("文字记录").Height(92).FillWidth()
+					})
+
+					if a.jDraftError != "" {
+						ui.Text(c, a.jDraftError).FontSize(13).FontWeight(600).TextColor(t.Danger)
+					}
+				})
+			})
 		})
 	})
-
-	if dlg.Dismissed() && a.recorder.Status().Recording {
-		// 录音过程中避免意外点空白处中断录音
-		a.journalModalOpen = true
-	}
 }
 
-func (a *AppState) saveJournalDraft(c *ui.Context) {
-	code, comName, sciName, order, family := a.resolveDraftSpecies()
-	if code == "" || comName == "" {
-		a.jDraftError = "请先选择或输入一个鸟种"
+func (a *AppState) startJournalRecording() {
+	a.jDraftError = ""
+	if a.win == nil {
+		if err := a.recorder.Start(); err != nil {
+			a.jDraftError = err.Error()
+		}
 		return
 	}
-	cnt, err := strconv.Atoi(strings.TrimSpace(a.jDraftCount))
-	if err != nil || cnt <= 0 {
-		cnt = 1
-	}
-
-	entry := model.JournalEntry{
-		ID:          a.jEditID,
-		SpeciesCode: code,
-		ComName:     comName,
-		SciName:     sciName,
-		Order:       order,
-		FamilyName:  family,
-		ObservedAt:  strings.TrimSpace(a.jDraftObservedAt),
-		Location:    strings.TrimSpace(a.jDraftLocation),
-		Count:       cnt,
-		Notes:       strings.TrimSpace(a.jDraftNotes),
-		PhotoPaths:  a.jDraftPhotos,
-		AudioPath:   a.jDraftAudio,
-	}
-
-	if a.jEditID == "" {
-		saved, newlyUnlocked, err := a.store.AddJournalEntry(entry)
-		if err != nil {
-			a.jDraftError = err.Error()
-			return
-		}
-		a.journalActiveID = saved.ID
-		a.journalModalOpen = false
-		a.refreshJournalList()
-		a.refreshStorageStats()
-		if newlyUnlocked {
-			c.Toast(fmt.Sprintf("已解锁新鸟种：%s（累计已解锁 %d 种）", saved.ComName, len(a.store.UnlockedBirds())))
-		} else {
-			c.Toast("已保存观鸟日志")
-		}
-	} else {
-		saved, err := a.store.UpdateJournalEntry(entry)
-		if err != nil {
-			a.jDraftError = err.Error()
-			return
-		}
-		a.journalActiveID = saved.ID
-		a.journalModalOpen = false
-		a.refreshJournalList()
-		a.refreshStorageStats()
-		c.Toast("已更新观鸟日志")
-	}
+	a.jRecBusy = true
+	go func() {
+		err := a.recorder.Start()
+		a.updateUI(func() {
+			a.jRecBusy = false
+			if err != nil {
+				a.jDraftError = err.Error()
+			}
+		})
+	}()
 }
 
-func (a *AppState) viewJournalDeleteDialog(c *ui.Context) {
-	switch ui.AlertDialog(c, &a.jDeleteConfirm, "删除这条观鸟日志？", "删除后不可恢复；若该鸟种已无其他记录，解锁状态也会同步移除。", "取消", "确认删除") {
-	case 1:
-		_ = a.store.DeleteJournalEntry(a.jDeleteTargetID)
-		a.jDeleteTargetID = ""
-		a.refreshJournalList()
-		a.refreshStorageStats()
-		c.Toast("已删除观鸟日志")
+func (a *AppState) stopJournalRecording() {
+	dst := filepath.Join(a.store.DataDir(), "journal", "media", fmt.Sprintf("rec_%d.wav", time.Now().UnixMilli()))
+	if a.win == nil {
+		if err := a.recorder.Stop(dst); err != nil {
+			a.jDraftError = err.Error()
+		} else {
+			a.jDraftAudio = dst
+			a.jDraftError = ""
+		}
+		return
 	}
+	a.jRecBusy = true
+	go func() {
+		err := a.recorder.Stop(dst)
+		a.updateUI(func() {
+			a.jRecBusy = false
+			if err != nil {
+				a.jDraftError = err.Error()
+			} else {
+				a.jDraftAudio = dst
+				a.jDraftError = ""
+				a.hapticSuccess()
+			}
+		})
+	}()
+}
+
+func (a *AppState) viewJournalPhotoActionSheet(c *ui.Context) {
+	mobile.ActionSheet(c, &a.journalPhotoSheet, mobile.ActionSheetOptions{
+		Title:  "添加观鸟照片",
+		Cancel: "取消",
+	},
+		mobile.Action{
+			Label: "拍照记录",
+			OnTap: func() { a.captureJournalPhotoAsync() },
+		},
+		mobile.Action{
+			Label: "从相册选择",
+			OnTap: func() { a.pickJournalPhotosAsync() },
+		},
+	)
+}
+
+func (a *AppState) viewJournalExportActionSheet(c *ui.Context) {
+	mobile.ActionSheet(c, &a.exportSheetOpen, mobile.ActionSheetOptions{
+		Title:  "分享与备份",
+		Cancel: "取消",
+	},
+		mobile.Action{
+			Label: "系统分享最近观察",
+			OnTap: func() { a.ShareOrExportJournal("share") },
+		},
+		mobile.Action{
+			Label: "导出为 CSV 表格",
+			OnTap: func() { a.ShareOrExportJournal("csv") },
+		},
+		mobile.Action{
+			Label: "导出为 JSON 文件",
+			OnTap: func() { a.ShareOrExportJournal("json") },
+		},
+	)
+}
+
+func (a *AppState) captureJournalPhotoAsync() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		p, err := imagepicker.Capture(ctx)
+		cancel()
+		if err != nil {
+			if errors.Is(err, errors.ErrUnsupported) {
+				a.pickJournalPhotosDesktopFallback()
+				return
+			}
+			a.updateUI(func() { a.jDraftError = fmt.Sprintf("调用相机失败: %v", err) })
+			return
+		}
+		if p != "" {
+			a.updateUI(func() { a.jDraftPhotos = append(a.jDraftPhotos, p) })
+		}
+	}()
 }
 
 func (a *AppState) pickJournalPhotosAsync() {
 	go func() {
-		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-			Parent:   a.win,
-			Title:    "选择观测照片",
-			Filters:  []mygo.FileFilter{{Name: "图片文件", Extensions: []string{"png", "jpg", "jpeg", "webp", "bmp"}}},
-			Multiple: true,
-		})
-		if err != nil || len(paths) == 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		paths, err := imagepicker.Pick(ctx, imagepicker.Options{Kind: imagepicker.Images, Limit: 9})
+		cancel()
+		if err != nil {
+			if errors.Is(err, errors.ErrUnsupported) {
+				a.pickJournalPhotosDesktopFallback()
+				return
+			}
+			a.updateUI(func() { a.jDraftError = fmt.Sprintf("打开相册失败: %v", err) })
 			return
 		}
-		a.updateUI(func() {
-			a.jDraftPhotos = append(a.jDraftPhotos, paths...)
-		})
+		if len(paths) > 0 {
+			a.updateUI(func() { a.jDraftPhotos = append(a.jDraftPhotos, paths...) })
+		}
 	}()
+}
+
+func (a *AppState) pickJournalPhotosDesktopFallback() {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:   a.win,
+		Title:    "选择观测照片",
+		Filters:  []mygo.FileFilter{{Name: "图片文件", Extensions: []string{"png", "jpg", "jpeg", "webp", "bmp"}}},
+		Multiple: true,
+	})
+	if err != nil || len(paths) == 0 {
+		return
+	}
+	a.updateUI(func() {
+		a.jDraftPhotos = append(a.jDraftPhotos, paths...)
+	})
 }
 
 func (a *AppState) pickJournalAudioAsync() {
@@ -668,164 +930,70 @@ func (a *AppState) pickJournalAudioAsync() {
 	}()
 }
 
-// ExportJournalDialog 打开系统保存对话框并导出观鸟日志（支持 "csv" 或 "json"）。
-func (a *AppState) ExportJournalDialog(format string) {
-	defaultName := "birdview_journal." + format
-	go func() {
-		dest, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
-			Parent:      a.win,
-			Title:       "导出观鸟日志",
-			DefaultPath: defaultName,
-		})
-		if err != nil || dest == "" {
+func (a *AppState) saveJournalDraft(c *ui.Context) {
+	code, comName, sciName, order, family := a.resolveDraftSpecies()
+	if code == "" || comName == "" {
+		a.jDraftError = "请先选择或输入一个鸟种"
+		return
+	}
+
+	entry := model.JournalEntry{
+		ID:          a.jEditID,
+		SpeciesCode: code,
+		ComName:     comName,
+		SciName:     sciName,
+		Order:       order,
+		FamilyName:  family,
+		ObservedAt:  strings.TrimSpace(a.jDraftObservedAt),
+		Location:    strings.TrimSpace(a.jDraftLocation),
+		Lat:         a.jDraftLat,
+		Lng:         a.jDraftLng,
+		Count:       max(1, a.jDraftCount),
+		Notes:       strings.TrimSpace(a.jDraftNotes),
+		PhotoPaths:  a.jDraftPhotos,
+		AudioPath:   a.jDraftAudio,
+	}
+
+	if a.jEditID == "" {
+		saved, newlyUnlocked, err := a.store.AddJournalEntry(entry)
+		if err != nil {
+			a.jDraftError = err.Error()
 			return
 		}
-		if format == "csv" {
-			err = a.store.ExportJournalCSV(dest)
+		a.journalSheetOpen = false
+		a.refreshJournalList()
+		a.refreshStorageStats()
+		a.hapticSuccess()
+		if newlyUnlocked {
+			c.Toast(fmt.Sprintf("已解锁新鸟种：%s（%d 种）", saved.ComName, len(a.store.UnlockedBirds())))
 		} else {
-			err = a.store.ExportJournalJSON(dest)
+			c.Toast("已保存观鸟日志")
 		}
-		a.updateUI(func() {
-			if err != nil {
-				a.pendingToast = fmt.Sprintf("导出失败: %v", err)
-			} else {
-				a.pendingToast = "已导出观鸟日志至 " + filepath.Base(dest)
-			}
-		})
-	}()
+	} else {
+		_, err := a.store.UpdateJournalEntry(entry)
+		if err != nil {
+			a.jDraftError = err.Error()
+			return
+		}
+		a.journalSheetOpen = false
+		a.refreshJournalList()
+		a.refreshStorageStats()
+		a.hapticSuccess()
+		c.Toast("已更新观鸟日志")
+	}
 }
 
-func (a *AppState) viewLifelist(c *ui.Context, t *ui.Theme) {
-	unlocked := a.store.UnlockedBirds()
-	entries := a.store.Entries()
-
-	chinaTotal := len(a.chinaCodes)
-	if chinaTotal == 0 {
-		chinaTotal = 1469
-	}
-	progress := float64(len(unlocked)) / float64(chinaTotal)
-	if progress > 1 {
-		progress = 1
-	}
-
-	familyCount := make(map[string]int)
-	for _, u := range unlocked {
-		fam := fallbackText(u.FamilyName, "未分类")
-		familyCount[fam]++
-	}
-	type famStat struct {
-		name  string
-		count int
-	}
-	var famList []famStat
-	for k, v := range familyCount {
-		famList = append(famList, famStat{k, v})
-	}
-	sort.Slice(famList, func(i, j int) bool {
-		if famList[i].count != famList[j].count {
-			return famList[i].count > famList[j].count
+func (a *AppState) viewJournalDeleteDialog(c *ui.Context) {
+	switch ui.AlertDialog(c, &a.jDeleteConfirm, "删除观鸟日志？", "删除后不可恢复；若该鸟种已无其他记录，解锁状态也会同步取消。", "取消", "确认删除") {
+	case 1:
+		target := a.jDeleteTargetID
+		_ = a.store.DeleteJournalEntry(target)
+		a.jDeleteTargetID = ""
+		a.refreshJournalList()
+		a.refreshStorageStats()
+		if strings.HasPrefix(a.router.Path(), "/journal/") {
+			a.goBack()
 		}
-		return famList[i].name < famList[j].name
-	})
-
-	ui.Scroll(c.Key("lifelist-scroll")).Fill().Padding(20).Gap(16).Children(func() {
-		// 统计概览卡片
-		ui.Column(c).FillWidth().Padding(16).Gap(12).Radius(t.Radius).Background(t.Surface).Border(1, t.Border).Children(func() {
-			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-				ui.Column(c).Gap(2).Children(func() {
-					ui.Text(c, "已解锁鸟种").FontSize(18).Bold()
-					ui.Textf(c, "累计记录 %d 次观测，跨越 %d 个科", len(entries), len(familyCount)).
-						FontSize(12.5).TextColor(t.TextMuted)
-				})
-				ui.PrimaryButton(c.Key("ll-add-btn"), "记录新鸟种").OnClick(func() {
-					a.OpenNewJournalModal("", "")
-				})
-			})
-
-			ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-				ui.Textf(c, "%d / %d", len(unlocked), chinaTotal).FontSize(16).Bold().FontFeatures("tnum")
-				ui.Progress(c, progress).Label("中国鸟类解锁进度").Grow(1)
-				ui.Textf(c, "%.1f%%", progress*100).FontSize(12.5).TextColor(t.TextMuted).FontFeatures("tnum")
-			})
-
-			if len(famList) > 0 {
-				ui.Row(c).Gap(6).Wrap().Children(func() {
-					maxChips := min(8, len(famList))
-					for _, fs := range famList[:maxChips] {
-						infoChip(c, t, fs.name, fmt.Sprintf("%d 种", fs.count))
-					}
-				})
-			}
-		})
-
-		ui.SearchField(c.Key("ll-search"), &a.lifelistFilter).Placeholder("搜索已解锁鸟种名称或首次发现地…").Label("筛选已解锁鸟种").Width(360)
-
-		q := strings.ToLower(strings.TrimSpace(a.lifelistFilter))
-		var visible []model.UnlockedBird
-		for _, u := range unlocked {
-			if q == "" ||
-				strings.Contains(strings.ToLower(u.ComName), q) ||
-				strings.Contains(strings.ToLower(u.SciName), q) ||
-				strings.Contains(strings.ToLower(u.FirstLocation), q) {
-				visible = append(visible, u)
-			}
-		}
-
-		if len(visible) == 0 {
-			ui.Column(c).FillWidth().Padding(32).Center().Gap(8).Radius(t.Radius).Background(t.Surface).Border(1, t.Border).Children(func() {
-				ui.Icon(c, iconAward).FontSize(28).TextColor(t.TextMuted)
-				ui.Text(c, "尚未解锁鸟种").Bold()
-				ui.Text(c, "在「观鸟日志」中添加观测记录后，对应鸟种会自动在此点亮").FontSize(12.5).TextColor(t.TextMuted)
-			})
-			return
-		}
-
-		// 已解锁鸟种卡片列表
-		ui.Column(c).FillWidth().Gap(10).Children(func() {
-			for _, u := range visible {
-				bird := u
-				ui.Row(c.Key("ll-" + bird.SpeciesCode)).FillWidth().Padding(12, 14).Gap(12).
-					AlignItems(ui.Center).Radius(t.Radius).Background(t.Surface).Border(1, t.Border).Children(func() {
-					if bird.CoverPhotoPath != "" {
-						imgKey := "local:" + bird.CoverPhotoPath
-						a.loadImageAsync(imgKey, bird.CoverPhotoPath, true)
-						if src, ok := a.imgCache[imgKey]; ok {
-							ui.Image(c, src).Size(64, 48).Fit(ui.Cover).Radius(6).Label(bird.ComName)
-						} else {
-							ui.Box(c).Size(64, 48).Center().Radius(6).Background(t.Background).Children(func() {
-								ui.Icon(c, iconImage).FontSize(18).TextColor(t.TextMuted)
-							})
-						}
-					} else {
-						ui.Box(c).Size(64, 48).Center().Radius(6).Background(t.Background).Children(func() {
-							ui.Icon(c, iconAward).FontSize(20).TextColor(t.Accent)
-						})
-					}
-
-					ui.Column(c).Grow(1).Gap(2).Children(func() {
-						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-							ui.Text(c, bird.ComName).FontSize(15).Bold()
-							ui.Text(c, bird.SciName).Italic().FontSize(12.5).TextColor(t.TextMuted)
-						})
-						ui.Textf(c, "首次记录：%s · %s · 累计 %d 次观测",
-							bird.FirstSeenAt, fallbackText(bird.FirstLocation, "未填地点"), bird.TotalSightings).
-							FontSize(12).TextColor(t.TextMuted)
-					})
-
-					ui.Row(c).Gap(6).Children(func() {
-						if ui.Button(c.Key("ll-log-"+bird.SpeciesCode), "查看日志").Clicked() {
-							a.journalQuery = bird.ComName
-							a.refreshJournalList()
-							a.page = "journal"
-						}
-						if _, ok := a.taxonByCode[bird.SpeciesCode]; ok {
-							if ui.Button(c.Key("ll-guide-"+bird.SpeciesCode), "图鉴").Clicked() {
-								a.OpenSpeciesInGuide(bird.SpeciesCode)
-							}
-						}
-					})
-				})
-			}
-		})
-	})
+		c.Toast("已删除观鸟日志")
+	}
 }
