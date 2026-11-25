@@ -13,7 +13,7 @@ func applyAppTheme(c *ui.Context) *ui.Theme {
 		base = ui.DarkTheme()
 		accent = ui.Hex("#38BDF8")
 	}
-	t := *base.WithAccent(accent)
+	t := *base.WithPreferences(c.Preferences()).WithAccent(accent)
 	t.Radius = 8
 	t.Spacing = 4
 	t.FontSize = 13.5
@@ -32,7 +32,6 @@ func applyAppTheme(c *ui.Context) *ui.Theme {
 		t.Border = ui.Hex("#E2E8F0")
 		t.TextMuted = ui.Hex("#64748B")
 	}
-	t = *t.WithPreferences(c.Preferences())
 	c.SetTheme(&t)
 	return &t
 }
