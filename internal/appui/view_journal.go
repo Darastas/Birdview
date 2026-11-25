@@ -270,7 +270,7 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 
 				for i, item := range a.filteredEntries {
 					entry := item
-					tactileCard(c, t).Key("jsw-"+entry.ID).Clip().Children(func() {
+					tactileCard(c, t).Key("jsw-" + entry.ID).Clip().Children(func() {
 						mobile.SwipeRow(c, nil, mobile.SwipeOptions{
 							Trailing: []mobile.SwipeAction{{
 								Label:       "删除",
@@ -299,7 +299,7 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 								ui.Column(c).Grow(1).Basis(0).Gap(3).Children(func() {
 									ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Baseline).Gap(8).Children(func() {
 										ui.Text(c, entry.ComName).FontSize(15).FontWeight(600).SingleLine().Grow(1)
-										statusPill(c, fmt.Sprintf("%d 只", max(1, entry.Count)), softPillColor(t), secondaryTextColor(t))
+										ui.Textf(c, "%d 只", max(1, entry.Count)).FontSize(13).FontWeight(500).TextColor(t.Text).FontFeatures("tnum").Shrink(0)
 									})
 									ui.Textf(c, "%s · %s", model.FormatObsTime(entry.ObservedAt), fallbackText(entry.Location, "野外地点")).
 										FontSize(12).TextColor(t.TextMuted).SingleLine()
@@ -338,7 +338,7 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 												}
 											}
 											if len(entry.PhotoPaths) > 1 {
-												statusPill(c, fmt.Sprintf("%d 张照片", len(entry.PhotoPaths)), softPillColor(t), t.TextMuted)
+												ui.Textf(c, "%d 张照片", len(entry.PhotoPaths)).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
 											}
 										})
 									}
@@ -550,14 +550,14 @@ func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID str
 					})
 				}
 
-				tactileCard(c, t).Padding(16).Gap(8).Children(func() {
+				tactileCard(c, t).Padding(16).Gap(6).Children(func() {
 					ui.Text(c, entry.ComName).FontSize(24).FontWeight(600).LetterSpacing(-0.1)
 					ui.Text(c, entry.SciName).FontSize(14).Italic().TextColor(t.TextMuted)
-					ui.Row(c).Gap(6).Wrap().Padding(4, 0, 0, 0).Children(func() {
-						statusPill(c, model.FormatObsTime(entry.ObservedAt), softPillColor(t), secondaryTextColor(t))
-						statusPill(c, fallbackText(entry.Location, "未填地点"), softPillColor(t), secondaryTextColor(t))
-						statusPill(c, fmt.Sprintf("%d 只", max(1, entry.Count)), softPillColor(t), t.Text)
-					})
+					metaAnnotationRow(c, t,
+						metaItem{Text: model.FormatObsTime(entry.ObservedAt), Tnum: true},
+						metaItem{Text: fallbackText(entry.Location, "未填地点")},
+						metaItem{Text: fmt.Sprintf("%d 只", max(1, entry.Count)), Color: t.Text, Weight: 500, Tnum: true},
+					)
 				})
 
 				if entry.AudioPath != "" {

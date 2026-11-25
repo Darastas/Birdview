@@ -106,12 +106,12 @@ type AppState struct {
 	regChecklistMap  map[string]*model.ChecklistDetail
 	regChecklistBusy map[string]bool
 
-	regPhotoBusy    bool
-	regPhotoErr     string
-	regFieldPhotos  []model.FieldPhotoObs
-	regPhotoPager   mobile.PageState
-	regActivePhoto  *model.FieldPhotoObs
-	exploreRefresh  ui.RefreshState
+	regPhotoBusy   bool
+	regPhotoErr    string
+	regFieldPhotos []model.FieldPhotoObs
+	regPhotoPager  mobile.PageState
+	regActivePhoto *model.FieldPhotoObs
+	exploreRefresh ui.RefreshState
 
 	hsRegionLabel string
 	hsQuery       string
@@ -165,13 +165,13 @@ type AppState struct {
 	setKeySheetOpen   bool
 	setAboutSheetOpen bool
 	setRegionLabel    string
-	setThemeMode    string
-	setVerifyBusy   bool
-	setVerifyMsg    string
-	setVerifyOK     bool
-	cacheStatsBytes int64
-	cacheStatsFiles int
-	localDataBytes  int64
+	setThemeMode      string
+	setVerifyBusy     bool
+	setVerifyMsg      string
+	setVerifyOK       bool
+	cacheStatsBytes   int64
+	cacheStatsFiles   int
+	localDataBytes    int64
 }
 
 // NewAppState 初始化移动端应用状态。

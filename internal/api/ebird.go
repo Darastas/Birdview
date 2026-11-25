@@ -4,13 +4,33 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Darastas/Birdview/internal/model"
 )
+
+var ebirdBrRe = regexp.MustCompile(`(?i)<br\s*/?>`)
+
+// CleanEBirdText 解码 eBird 接口返回的 HTML 字符实体（如 &#xff0c; -> ，）并规范换行。
+func CleanEBirdText(s string) string {
+	if s == "" {
+		return ""
+	}
+	out := s
+	for range 2 {
+		next := html.UnescapeString(out)
+		if next == out {
+			break
+		}
+		out = next
+	}
+	return ebirdBrRe.ReplaceAllString(out, "\n")
+}
 
 // ChinaRegions 预置中国 34 个省级行政区及代表性坐标（用于区域观测与热点探索）。
 var ChinaRegions = []model.RegionOption{
@@ -111,6 +131,10 @@ func (c *Client) FetchRecentObservations(ctx context.Context, apiKey, regionCode
 	if err := c.getJSON(ctx, u, map[string]string{"X-eBirdApiToken": apiKey}, &out); err != nil {
 		return nil, err
 	}
+	for i := range out {
+		out[i].LocName = CleanEBirdText(out[i].LocName)
+		out[i].UserDisplayName = CleanEBirdText(out[i].UserDisplayName)
+	}
 	return out, nil
 }
 
@@ -134,6 +158,10 @@ func (c *Client) FetchNearbyObservations(ctx context.Context, apiKey string, lat
 	if err := c.getJSON(ctx, u, map[string]string{"X-eBirdApiToken": apiKey}, &out); err != nil {
 		return nil, err
 	}
+	for i := range out {
+		out[i].LocName = CleanEBirdText(out[i].LocName)
+		out[i].UserDisplayName = CleanEBirdText(out[i].UserDisplayName)
+	}
 	return out, nil
 }
 
@@ -146,6 +174,11 @@ func (c *Client) FetchChecklistDetail(ctx context.Context, apiKey, subID string)
 	var out model.ChecklistDetail
 	if err := c.getJSON(ctx, u, map[string]string{"X-eBirdApiToken": apiKey}, &out); err != nil {
 		return nil, err
+	}
+	out.UserDisplayName = CleanEBirdText(out.UserDisplayName)
+	for i := range out.Obs {
+		out.Obs[i].Comments = CleanEBirdText(out.Obs[i].Comments)
+		out.Obs[i].ComName = CleanEBirdText(out.Obs[i].ComName)
 	}
 	return &out, nil
 }
@@ -163,6 +196,9 @@ func (c *Client) FetchHotspots(ctx context.Context, apiKey, regionCode string, b
 	var out []model.Hotspot
 	if err := c.getJSON(ctx, u, map[string]string{"X-eBirdApiToken": apiKey}, &out); err != nil {
 		return nil, err
+	}
+	for i := range out {
+		out[i].LocName = CleanEBirdText(out[i].LocName)
 	}
 	return out, nil
 }
