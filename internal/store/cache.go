@@ -131,6 +131,30 @@ func (c *Cache) SaveThumbIndex(idx map[string]string) error {
 	return writeJSON(p, idx)
 }
 
+// LoadSpeciesList 读取指定区域缓存的 eBird 物种代码列表。
+func (c *Cache) LoadSpeciesList(regionCode string, maxAge time.Duration) ([]string, bool) {
+	p := filepath.Join(c.dir, "spplist_"+regionCode+".json")
+	info, err := os.Stat(p)
+	if err != nil || (maxAge > 0 && time.Since(info.ModTime()) > maxAge) {
+		return nil, false
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil, false
+	}
+	var out []string
+	if err := json.Unmarshal(data, &out); err != nil || len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}
+
+// SaveSpeciesList 将指定区域的 eBird 物种代码列表写入缓存目录。
+func (c *Cache) SaveSpeciesList(regionCode string, codes []string) error {
+	p := filepath.Join(c.dir, "spplist_"+regionCode+".json")
+	return writeJSON(p, codes)
+}
+
 // Stats 返回当前媒体缓存（含名录缓存）总字节数与文件数。
 func (c *Cache) Stats() (bytes int64, files int) {
 	c.mu.Lock()

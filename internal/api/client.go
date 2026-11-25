@@ -23,12 +23,12 @@ type Client struct {
 	XenoBaseURL  string
 }
 
-// NewClient 创建使用系统代理、默认超时 15 秒的 API 客户端。
+// NewClient 创建使用系统代理、默认超时 30 秒的 API 客户端。
 func NewClient() *Client {
 	return &Client{
 		HTTP: &http.Client{
 			Transport: netproxy.Transport(),
-			Timeout:   15 * time.Second,
+			Timeout:   30 * time.Second,
 		},
 		EBirdBaseURL: "https://api.ebird.org/v2",
 		INatBaseURL:  "https://api.inaturalist.org/v1",

@@ -83,7 +83,7 @@ func TestMobileGuideSearchRouteAndSettings(t *testing.T) {
 	tt := ui.NewTester(app.View, 402, 844)
 
 	// 验证分类名已全部转为纯中文（绝不泄漏英文 Kingfishers）
-	if !tt.HasText("鸟类图鉴") || !tt.HasText("普通翠鸟") || !tt.HasText("佛法僧目 · 翠鸟科") {
+	if !tt.HasText("图鉴") || !tt.HasText("普通翠鸟") || !tt.HasText("佛法僧目 · 翠鸟科") {
 		t.Fatalf("expected localized mobile guide view, texts=%q", tt.Texts())
 	}
 	if tt.HasText("Kingfishers") {

@@ -14,7 +14,7 @@ import (
 func maskKeyPreview(k string) string {
 	trimmed := strings.TrimSpace(k)
 	if trimmed == "" {
-		return "未配置（点击填写以启用中国名录与区域实时观测）"
+		return "未配置（点击填写以启用中国名录与区域观测）"
 	}
 	if len(trimmed) <= 4 {
 		return "已配置"
@@ -22,33 +22,45 @@ func maskKeyPreview(k string) string {
 	return fmt.Sprintf("已配置（尾号 ...%s）", trimmed[len(trimmed)-4:])
 }
 
+func settingsRow(c *ui.Context, key, title, subtitle string, t *ui.Theme, trailing func()) ui.Element {
+	row := ui.Row(c.Key(key)).FillWidth().Padding(13, 16).Gap(10).AlignItems(ui.Center).
+		Role(ui.RoleButton).Label(title)
+	row.Children(func() {
+		ui.Column(c).Grow(1).Basis(0).Gap(2).Children(func() {
+			ui.Text(c, title).FontSize(15).FontWeight(500)
+			if subtitle != "" {
+				ui.Text(c, subtitle).FontSize(12.5).TextColor(t.TextMuted).SingleLine()
+			}
+		})
+		if trailing != nil {
+			trailing()
+		} else {
+			ui.Icon(c, iconChevronRight).FontSize(15).TextColor(t.TextMuted.Alpha(0.55))
+		}
+	})
+	return row
+}
+
 func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Children(func() {
-		ui.Box(c).FillWidth().Padding(12, 16, 10, 16).Children(func() {
-			ui.Text(c, "设置").FontSize(26).Bold().Role(ui.RoleHeading).Level(1)
+		ui.Box(c).FillWidth().Padding(16, 20, 8, 20).Children(func() {
+			ui.Text(c, "设置").FontSize(24).FontWeight(700).LetterSpacing(-0.4).Role(ui.RoleHeading).Level(1)
 		})
 
 		ui.Scroll(c.Key("settings-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
-			ui.Column(c).FillWidth().Padding(4, 16, 28, 16).Gap(18).Children(func() {
+			ui.Column(c).FillWidth().Padding(6, 20, 32, 20).Gap(20).Children(func() {
 				// 1. 数据接口与密钥
-				ui.Column(c).FillWidth().Gap(6).Children(func() {
-					ui.Text(c, "接口与密钥").FontSize(13).FontWeight(600).TextColor(t.TextMuted).PaddingX(4)
-					elevatedCard(c, t).Clip().Dividers(0.5, subtleHairlineColor(t)).Children(func() {
-						if mobile.ListRow(c.Key("set-row-ebird"), mobile.RowOptions{
-							Title:      "eBird API Key",
-							Subtitle:   maskKeyPreview(a.store.LoadEbirdKey()),
-							Disclosure: true,
-						}).Clicked() {
+				ui.Column(c).FillWidth().Gap(8).Children(func() {
+					ui.Text(c, "接口与密钥").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted).PaddingX(4)
+					flatSurface(c, t).Clip().Dividers(1, t.Border).Children(func() {
+						if settingsRow(c, "set-row-ebird", "eBird API Key", maskKeyPreview(a.store.LoadEbirdKey()), t, nil).Clicked() {
 							a.syncSettingsDraft()
 							a.setVerifyMsg = ""
 							a.setKeySheetOpen = true
 						}
 
-						if mobile.ListRow(c.Key("set-row-xeno"), mobile.RowOptions{
-							Title:      "Xeno-canto v3 Key（可选）",
-							Subtitle:   fallbackText(maskOptionalKey(a.store.LoadXenoKey()), "未配置（图鉴默认播放 iNaturalist 野外录音）"),
-							Disclosure: true,
-						}).Clicked() {
+						if settingsRow(c, "set-row-xeno", "Xeno-canto v3 Key（可选）",
+							fallbackText(maskOptionalKey(a.store.LoadXenoKey()), "未配置（默认播放 iNaturalist 野外录音）"), t, nil).Clicked() {
 							a.syncSettingsDraft()
 							a.setVerifyMsg = ""
 							a.setKeySheetOpen = true
@@ -56,22 +68,18 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 					})
 				})
 
-				// 2. 观鸟地区与外观
-				ui.Column(c).FillWidth().Gap(6).Children(func() {
-					ui.Text(c, "偏好设置").FontSize(13).FontWeight(600).TextColor(t.TextMuted).PaddingX(4)
-					elevatedCard(c, t).Clip().Dividers(0.5, subtleHairlineColor(t)).Children(func() {
-						if mobile.ListRow(c.Key("set-row-region"), mobile.RowOptions{
-							Title:      "默认观鸟区域",
-							Subtitle:   a.setRegionLabel,
-							Disclosure: true,
-						}).Clicked() {
+				// 2. 偏好设置
+				ui.Column(c).FillWidth().Gap(8).Children(func() {
+					ui.Text(c, "偏好设置").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted).PaddingX(4)
+					flatSurface(c, t).Clip().Dividers(1, t.Border).Children(func() {
+						if settingsRow(c, "set-row-region", "默认观鸟区域", a.setRegionLabel, t, nil).Clicked() {
 							a.regRegionTarget = "settings"
 							a.regRegionQuery = ""
 							a.regRegionSheetOpen = true
 						}
 
-						ui.Column(c).FillWidth().Padding(12, 16).Gap(8).Children(func() {
-							ui.Text(c, "外观主题").FontSize(15)
+						ui.Column(c).FillWidth().Padding(13, 16).Gap(10).Children(func() {
+							ui.Text(c, "外观主题").FontSize(15).FontWeight(500)
 							themeIdx := 0
 							switch a.setThemeMode {
 							case "浅色":
@@ -79,7 +87,7 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 							case "深色":
 								themeIdx = 2
 							}
-							if segmentedPillStrip(c, "set-theme-seg", &themeIdx, t, "跟随系统", "浅色", "深色") {
+							if minimalSegmentedControl(c, "set-theme-seg", &themeIdx, t, "跟随系统", "浅色", "深色") {
 								modes := []string{"跟随系统", "浅色", "深色"}
 								a.setThemeMode = modes[themeIdx]
 								a.saveThemePreferenceOnly(c, themeModeFromLabel(a.setThemeMode))
@@ -89,14 +97,20 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 				})
 
 				// 3. 存储与备份
-				ui.Column(c).FillWidth().Gap(6).Children(func() {
-					ui.Text(c, "存储与备份").FontSize(13).FontWeight(600).TextColor(t.TextMuted).PaddingX(4)
-					elevatedCard(c, t).Clip().Dividers(0.5, subtleHairlineColor(t)).Children(func() {
-						mobile.ListRow(c.Key("set-row-cache"), mobile.RowOptions{
-							Title:    "清理在线媒体缓存",
-							Subtitle: fmt.Sprintf("图鉴与音频缓存 %s（%d 个文件）", formatBytes(a.cacheStatsBytes), a.cacheStatsFiles),
-							Trailing: func() {
-								if filterPill(c, "clear-cache-btn", "清理", false, t).Clicked() {
+				ui.Column(c).FillWidth().Gap(8).Children(func() {
+					ui.Text(c, "存储与备份").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted).PaddingX(4)
+					flatSurface(c, t).Clip().Dividers(1, t.Border).Children(func() {
+						settingsRow(c, "set-row-cache", "清理在线媒体缓存",
+							fmt.Sprintf("已缓存 %s（%d 个文件）", formatBytes(a.cacheStatsBytes), a.cacheStatsFiles), t, func() {
+								clrBtn := ui.Row(c.Key("clear-cache-btn")).Height(28).PaddingX(12).Radius(14).
+									Background(t.Background).AlignItems(ui.Center).Role(ui.RoleButton).Label("清理")
+								if t.Dark {
+									clrBtn.Border(1, t.Border)
+								}
+								clrBtn.Children(func() {
+									ui.Text(c, "清理").FontSize(12).FontWeight(500).TextColor(t.Text)
+								})
+								if clrBtn.Clicked() {
 									if a.cache != nil {
 										_ = a.cache.Clear()
 									}
@@ -108,27 +122,22 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 									a.refreshStorageStats()
 									c.Toast("已清空在线媒体缓存")
 								}
-							},
-						})
+							})
 
-						if mobile.ListRow(c.Key("set-row-export"), mobile.RowOptions{
-							Title:      "个人日志与导出备份",
-							Subtitle:   fmt.Sprintf("本机已使用 %s · %d 个已解锁鸟种", formatBytes(a.localDataBytes), len(a.store.UnlockedBirds())),
-							Disclosure: true,
-						}).Clicked() {
+						if settingsRow(c, "set-row-export", "个人日志与导出备份",
+							fmt.Sprintf("本机占用 %s · %d 个已解锁鸟种", formatBytes(a.localDataBytes), len(a.store.UnlockedBirds())), t, nil).Clicked() {
 							a.exportSheetOpen = true
 						}
 					})
 				})
 
 				// 4. 关于
-				ui.Column(c).FillWidth().Gap(6).Children(func() {
-					ui.Text(c, "关于").FontSize(13).FontWeight(600).TextColor(t.TextMuted).PaddingX(4)
-					elevatedCard(c, t).Clip().Children(func() {
-						mobile.ListRow(c.Key("set-row-about"), mobile.RowOptions{
-							Title:    "Birdview v2.0.0",
-							Subtitle: "数据源自 eBird API v2、iNaturalist、Xeno-canto v3 与中文维基百科",
-						})
+				ui.Column(c).FillWidth().Gap(8).Children(func() {
+					ui.Text(c, "关于").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted).PaddingX(4)
+					flatSurface(c, t).Padding(14, 16).Gap(4).Children(func() {
+						ui.Text(c, "Birdview v2.0.0").FontSize(15).FontWeight(600)
+						ui.Text(c, "数据源自 eBird API v2、iNaturalist、Xeno-canto v3 与中文维基百科").
+							FontSize(12.5).TextColor(t.TextMuted).LineHeight(1.5)
 					})
 				})
 			})
@@ -148,48 +157,61 @@ func maskOptionalKey(k string) string {
 }
 
 func (a *AppState) viewSettingsKeySheet(c *ui.Context, t *ui.Theme) {
-	mobile.Sheet(c, &a.setKeySheetOpen, mobile.SheetOptions{Detents: []float32{0.68, 0.9}, Label: "API 密钥设置"}, func() {
+	sheetBg := t.Background
+	mobile.Sheet(c, &a.setKeySheetOpen, mobile.SheetOptions{
+		Detents:    []float32{0.68, 0.9},
+		Background: &sheetBg,
+		Label:      "API 密钥设置",
+	}, func() {
 		ui.Column(c).Fill().Children(func() {
-			ui.Row(c).FillWidth().Padding(8, 16, 12, 16).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-				if ui.Button(c.Key("sk-cancel"), "取消").Clicked() {
+			ui.Row(c).FillWidth().Padding(8, 20, 14, 20).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+				cancelBtn := ui.Box(c.Key("sk-cancel")).Padding(6, 4).
+					Role(ui.RoleButton).Label("取消").Children(func() {
+					ui.Text(c, "取消").FontSize(15).TextColor(t.TextMuted)
+				})
+				if cancelBtn.Clicked() {
 					a.setKeySheetOpen = false
 				}
-				ui.Text(c, "API 密钥设置").FontSize(17).FontWeight(600)
-				if ui.PrimaryButton(c.Key("sk-save"), "保存设置").Radius(16).Clicked() {
+				ui.Text(c, "API 密钥设置").FontSize(16.5).FontWeight(600)
+				if filterPill(c, "sk-save", "保存设置", true, t).Clicked() {
 					a.saveKeysFromUI(c)
 				}
 			})
+			minimalDivider(c, t)
 
 			ui.Scroll(c.Key("sk-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
-				ui.Column(c).FillWidth().Padding(4, 16, 28, 16).Gap(14).Children(func() {
-					elevatedCard(c, t).Padding(16).Gap(10).Children(func() {
+				ui.Column(c).FillWidth().Padding(16, 20, 32, 20).Gap(18).Children(func() {
+					ui.Column(c).FillWidth().Gap(8).Children(func() {
 						ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-							ui.Text(c, "eBird 数据接口密钥").FontSize(14).FontWeight(600)
+							ui.Text(c, "eBird 数据接口密钥").FontSize(13).FontWeight(600).TextColor(t.TextMuted)
 							ui.Link(c, "免费申请 Key ↗", "https://ebird.org/api/keygen")
 						})
-						in1 := ui.TextInput(c.Key("set-ebird-key"), &a.setEbirdKey).
-							Placeholder("输入 X-eBirdApiToken（加密保存在系统凭据库）").
-							Label("eBird API Key 输入框").FillWidth().Height(42)
+						in1 := minimalTextInput(c, "set-ebird-key", &a.setEbirdKey,
+							"输入 X-eBirdApiToken（加密保存在本机凭据库）", "eBird API Key 输入框", t)
 						if !a.setShowKeys {
 							in1.Password()
 						}
+					})
 
-						ui.Text(c, "Xeno-canto API v3 Key（可选）").FontSize(14).FontWeight(600).Padding(6, 0, 0, 0)
-						in2 := ui.TextInput(c.Key("set-xc-key"), &a.setXenoKey).
-							Placeholder("可选：扩展专业鸟鸣库").
-							Label("Xeno-canto API Key").FillWidth().Height(42)
+					ui.Column(c).FillWidth().Gap(8).Children(func() {
+						ui.Text(c, "Xeno-canto API v3 Key（可选）").FontSize(13).FontWeight(600).TextColor(t.TextMuted)
+						in2 := minimalTextInput(c, "set-xc-key", &a.setXenoKey,
+							"可选：扩展专业鸟鸣库", "Xeno-canto API Key", t)
 						if !a.setShowKeys {
 							in2.Password()
 						}
-
-						ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Padding(4, 0, 0, 0).Children(func() {
-							ui.Text(c, "显示密钥明文").FontSize(14)
-							mobile.Switch(c.Key("sk-show-sw"), &a.setShowKeys)
-						})
 					})
 
+					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "显示密钥明文").FontSize(14.5)
+						mobile.Switch(c.Key("sk-show-sw"), &a.setShowKeys)
+					})
+
+					minimalDivider(c, t)
+
 					ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-						if ui.Button(c.Key("verify-key-btn"), "测试 eBird 连接").Disabled(a.setVerifyBusy).Height(42).Radius(21).Clicked() {
+						if monochromeButton(c, "verify-key-btn", "测试 eBird 连接", false, t).
+							Height(40).Radius(20).Disabled(a.setVerifyBusy).Clicked() {
 							a.verifyEbirdKeyAsync()
 						}
 						if a.setVerifyBusy {
@@ -258,7 +280,7 @@ func (a *AppState) verifyEbirdKeyAsync() {
 	a.invalidateUI()
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		elapsed, err := a.client.VerifyEbirdKey(ctx, key)
 		cancel()
 
