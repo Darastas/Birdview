@@ -304,3 +304,145 @@ func TestMobileExploreChecklistIsolationAndHotspots(t *testing.T) {
 		t.Fatalf("expected journal sheet open with hotspot location, open=%v loc=%q", app.journalSheetOpen, app.jDraftLocation)
 	}
 }
+
+func TestCrystalGlassAndSkeletonRender(t *testing.T) {
+	app := newTestAppState(t)
+	tt := ui.NewTester(app.View, 402, 844)
+	advanceUI(tt, 64*time.Millisecond)
+
+	// 验证光学液态玻璃底栏、顶部渐变遮罩与网格渲染
+	img := tt.Image()
+	if img.Bounds().Dx() != 402 || img.Bounds().Dy() != 844 {
+		t.Fatalf("unexpected guide render bounds: %v", img.Bounds())
+	}
+
+	// 验证探索加载骨架屏渲染
+	if err := tt.Click("探索"); err != nil {
+		t.Fatal(err)
+	}
+	app.regPhotoBusy = true
+	advanceUI(tt, 64*time.Millisecond)
+	if img := tt.Image(); img.Bounds().Dx() != 402 {
+		t.Fatalf("unexpected explore skeleton render bounds: %v", img.Bounds())
+	}
+
+	// 验证设置页移除冗余小字分组标题后可正常渲染
+	if err := tt.Click("设置"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 64*time.Millisecond)
+	for _, removedHeading := range []string{"接口与密钥", "偏好设置", "存储与备份"} {
+		if tt.HasText(removedHeading) {
+			t.Fatalf("expected removed settings section heading %q to be absent, texts=%q", removedHeading, tt.Texts())
+		}
+	}
+	if !tt.HasText("eBird API Key") || !tt.HasText("外观主题") || !tt.HasText("关于 Birdview") {
+		t.Fatalf("expected clean settings rows intact, texts=%q", tt.Texts())
+	}
+	if img := tt.Image(); img.Bounds().Dy() != 844 {
+		t.Fatalf("unexpected settings render bounds: %v", img.Bounds())
+	}
+}
+
+func TestGuideScopeAndFilterSearch(t *testing.T) {
+	app := newTestAppState(t)
+	tt := ui.NewTester(app.View, 402, 844)
+
+	// 1. 通过正交地点按钮切换图鉴范围至「全球」
+	if err := tt.Click("切换图鉴地区范围"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 750*time.Millisecond)
+	if !app.guideScopeSheet {
+		t.Fatal("expected guideScopeSheet to open")
+	}
+	if err := tt.Click("全球"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 800*time.Millisecond)
+	if app.session.GuideScope != 2 || app.guideScopeSheet {
+		t.Fatalf("expected GuideScope=2 and sheet closed, got scope=%d open=%v", app.session.GuideScope, app.guideScopeSheet)
+	}
+
+	// 2. 紧凑型「全部 | 已解锁」开关切换
+	if err := tt.Click("已解锁"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 100*time.Millisecond)
+	if !app.session.GuideOnlyUnlocked || len(app.filteredTaxa) != 0 || !tt.HasText("暂无匹配的鸟种") {
+		t.Fatalf("expected empty unlocked list, onlyUnlocked=%v count=%d", app.session.GuideOnlyUnlocked, len(app.filteredTaxa))
+	}
+	if err := tt.Click("全部"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 100*time.Millisecond)
+	if app.session.GuideOnlyUnlocked || len(app.filteredTaxa) != 3 {
+		t.Fatalf("expected all 3 taxa restored, onlyUnlocked=%v count=%d", app.session.GuideOnlyUnlocked, len(app.filteredTaxa))
+	}
+
+	// 3. 目科筛选抽屉内实时搜索
+	if err := tt.Click("目科筛选"); err != nil {
+		if err2 := tt.Click("目科"); err2 != nil {
+			t.Fatalf("click filter button failed: %v / %v", err, err2)
+		}
+	}
+	advanceUI(tt, 750*time.Millisecond)
+	if !app.guideFilterSheet {
+		t.Fatal("expected guideFilterSheet to open")
+	}
+	if err := tt.Click("搜索目科"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("翠鸟")
+	advanceUI(tt, 100*time.Millisecond)
+	if app.guideFilterQuery != "翠鸟" || !tt.HasText("按科筛选") || !tt.HasText("翠鸟科") || tt.HasText("按目筛选") {
+		t.Fatalf("expected guide filter search narrowed to 按科筛选 -> 翠鸟科, query=%q texts=%q", app.guideFilterQuery, tt.Texts())
+	}
+	if err := tt.Click("翠鸟科"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("完成"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 800*time.Millisecond)
+	if app.guideFilterSheet || len(app.filteredTaxa) != 1 || app.filteredTaxa[0].SpeciesCode != "comkin1" {
+		t.Fatalf("expected filtered single kingfisher, open=%v taxa=%+v", app.guideFilterSheet, app.filteredTaxa)
+	}
+}
+
+func TestPhotoLightboxContainAndReset(t *testing.T) {
+	app := newTestAppState(t)
+	tt := ui.NewTester(app.View, 402, 844)
+
+	photos := []model.MediaPhoto{
+		{URL: "http://127.0.0.1:1/bird-1.jpg", ThumbURL: "http://127.0.0.1:1/bird-1-t.jpg", Source: "iNaturalist", Attribution: "Tester 1"},
+		{URL: "http://127.0.0.1:1/bird-2.jpg", ThumbURL: "http://127.0.0.1:1/bird-2-t.jpg", Source: "iNaturalist", Attribution: "Tester 2"},
+	}
+
+	app.openNetworkPhotosViewer("普通翠鸟", photos, 1)
+	advanceUI(tt, 120*time.Millisecond)
+	if !app.zoomOpen || app.zoomPager.Page != 1 || len(app.zoomPhotos) != 2 {
+		t.Fatalf("expected lightbox open at page 1, open=%v page=%d len=%d", app.zoomOpen, app.zoomPager.Page, len(app.zoomPhotos))
+	}
+	if !tt.HasText("普通翠鸟") || !tt.HasText("第 2 / 2 张") {
+		t.Fatalf("expected lightbox title & counter, texts=%q", tt.Texts())
+	}
+	if img := tt.Image(); img.Bounds().Dx() != 402 {
+		t.Fatalf("unexpected lightbox skeleton render bounds: %v", img.Bounds())
+	}
+
+	if err := tt.Click("关闭大图查看"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 120*time.Millisecond)
+	if app.zoomOpen {
+		t.Fatal("expected lightbox closed")
+	}
+
+	// 重新打开不同图片时页码与缩放状态必须复位，不可残留上次索引 1
+	app.openNetworkPhotosViewer("戴胜", photos[:1], 0)
+	advanceUI(tt, 120*time.Millisecond)
+	if !app.zoomOpen || app.zoomPager.Page != 0 || !tt.HasText("第 1 / 1 张") {
+		t.Fatalf("expected lightbox page reset to 0, open=%v page=%d texts=%q", app.zoomOpen, app.zoomPager.Page, tt.Texts())
+	}
+}

@@ -45,11 +45,10 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, "设置").FontSize(26).FontWeight(600).LetterSpacing(-0.1).Role(ui.RoleHeading).Level(1)
 		})
 
-		ui.Scroll(c.Key("settings-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
-			ui.Column(c).FillWidth().Padding(4, 18, 106, 18).Gap(18).Children(func() {
-				// 1. 数据接口与密钥
-				ui.Column(c).FillWidth().Gap(8).Children(func() {
-					ui.Text(c, "接口与密钥").FontSize(12).FontWeight(500).LetterSpacing(0.3).TextColor(t.TextMuted).PaddingX(4)
+		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
+			ui.Scroll(c.Key("settings-scroll")).Fill().Children(func() {
+				ui.Column(c).FillWidth().Padding(10, 18, 106, 18).Gap(14).Children(func() {
+					// 1. 数据接口与密钥
 					tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
 						if settingsRow(c, "set-row-ebird", "eBird API Key", maskKeyShort(a.store.LoadEbirdKey()), t, nil).Clicked() {
 							a.syncSettingsDraft()
@@ -63,11 +62,8 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 							a.setKeySheetOpen = true
 						}
 					})
-				})
 
-				// 2. 偏好设置
-				ui.Column(c).FillWidth().Gap(8).Children(func() {
-					ui.Text(c, "偏好设置").FontSize(12).FontWeight(500).LetterSpacing(0.3).TextColor(t.TextMuted).PaddingX(4)
+					// 2. 偏好设置
 					tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
 						if settingsRow(c, "set-row-region", "默认观鸟区域", regionShortNameByCode(a.store.Settings().DefaultRegion), t, nil).Clicked() {
 							a.regRegionTarget = "settings"
@@ -91,11 +87,8 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 							}
 						})
 					})
-				})
 
-				// 3. 存储与备份
-				ui.Column(c).FillWidth().Gap(8).Children(func() {
-					ui.Text(c, "存储与备份").FontSize(12).FontWeight(500).LetterSpacing(0.3).TextColor(t.TextMuted).PaddingX(4)
+					// 3. 存储与备份
 					tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
 						settingsRow(c, "set-row-cache", "在线媒体缓存", formatBytes(a.cacheStatsBytes), t, func() {
 							clrBtn := applySculptedSecondaryPillStyle(
@@ -124,11 +117,8 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 							a.exportSheetOpen = true
 						}
 					})
-				})
 
-				// 4. 关于
-				ui.Column(c).FillWidth().Gap(8).Children(func() {
-					ui.Text(c, "关于").FontSize(12).FontWeight(500).LetterSpacing(0.3).TextColor(t.TextMuted).PaddingX(4)
+					// 4. 关于
 					tactileCard(c, t).Clip().Children(func() {
 						if settingsRow(c, "set-row-about", "关于 Birdview", "v2.0.0", t, nil).Clicked() {
 							a.setAboutSheetOpen = true
@@ -136,6 +126,7 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 					})
 				})
 			})
+			scrollTopFadeScrim(c, t)
 		})
 	})
 }

@@ -249,110 +249,113 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 		}
 	})
 
-	scroll := ui.Scroll(c.Key("j-timeline-scroll")).Grow(1).Basis(0).FillWidth()
-	if scroll.PullToRefresh(&a.journalRefresh) {
-		a.refreshJournalList()
-		a.journalRefresh.Refreshing = false
-	}
-	scroll.Children(func() {
-		ui.Column(c).FillWidth().Padding(4, 18, 112, 18).Gap(10).Children(func() {
-			if len(a.filteredEntries) == 0 {
-				tactileCard(c, t).Padding(34).Center().Gap(10).Children(func() {
-					tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
-						ui.Icon(c, iconJournal).FontSize(22).TextColor(t.TextMuted)
-					})
-					ui.Text(c, "暂无观鸟日志").FontSize(16).FontWeight(600)
-					ui.Text(c, "点击右下角 + 记录今天的目击并点亮图鉴").FontSize(13).TextColor(t.TextMuted)
-				})
-				return
-			}
-
-			for i, item := range a.filteredEntries {
-				entry := item
-				tactileCard(c, t).Key("jsw-"+entry.ID).Clip().Children(func() {
-					mobile.SwipeRow(c, nil, mobile.SwipeOptions{
-						Trailing: []mobile.SwipeAction{{
-							Label:       "删除",
-							Destructive: true,
-							OnTap: func() {
-								a.jDeleteTargetID = entry.ID
-								a.jDeleteConfirm = true
-							},
-						}},
-					}, func() {
-						row := ui.Row(c).FillWidth().Padding(14, 16).Gap(12).AlignItems(ui.Center).
-							Role(ui.RoleButton).Label(entry.ComName + " 日志详情")
-						row.Children(func() {
-							if len(entry.PhotoPaths) > 0 {
-								p := entry.PhotoPaths[0]
-								a.loadLocalImageAsync(p)
-								if src, ok := a.localImgCache[p]; ok {
-									ui.Image(c, src).Size(62, 62).Fit(ui.Cover).Radius(12).Shrink(0).Label(entry.ComName)
-								} else {
-									tactileRecessedStyle(ui.Box(c).Size(62, 62), t, 12).Center().Shrink(0).Children(func() {
-										ui.Icon(c, iconImage).FontSize(20).TextColor(t.TextMuted)
-									})
-								}
-							}
-
-							ui.Column(c).Grow(1).Basis(0).Gap(3).Children(func() {
-								ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Baseline).Gap(8).Children(func() {
-									ui.Text(c, entry.ComName).FontSize(15).FontWeight(600).SingleLine().Grow(1)
-									statusPill(c, fmt.Sprintf("%d 只", max(1, entry.Count)), softPillColor(t), secondaryTextColor(t))
-								})
-								ui.Textf(c, "%s · %s", model.FormatObsTime(entry.ObservedAt), fallbackText(entry.Location, "野外地点")).
-									FontSize(12).TextColor(t.TextMuted).SingleLine()
-
-								if strings.TrimSpace(entry.Notes) != "" {
-									ui.Text(c, entry.Notes).FontSize(13).LineHeight(1.5).TextColor(secondaryTextColor(t)).MaxLines(2)
-								}
-
-								if entry.AudioPath != "" || len(entry.PhotoPaths) > 1 {
-									ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(2, 0, 0, 0).Children(func() {
-										if entry.AudioPath != "" {
-											pst := a.player.Status()
-											isThis := pst.SourceKey == entry.AudioPath
-											label := "现场录音"
-											if isThis && pst.Playing {
-												label = "暂停录音"
-											}
-											playPill := ui.Row(c.Key(fmt.Sprintf("jt-aud-%d", i))).Padding(4, 10).Radius(999).
-												Background(opticalAccentColor(t).Alpha(0.12)).Gap(4).AlignItems(ui.Center).Role(ui.RoleButton).Label(label)
-											playPill.Children(func() {
-												ic := iconPlay
-												if isThis && pst.Playing {
-													ic = iconPause
-												}
-												ui.Icon(c, ic).FontSize(10).TextColor(opticalAccentColor(t))
-												ui.Text(c, label).FontSize(11).FontWeight(500).TextColor(opticalAccentColor(t))
-											})
-											if playPill.Clicked() {
-												if isThis && pst.Active {
-													a.player.TogglePause()
-												} else {
-													a.player.PlayFile(entry.AudioPath, entry.ComName+" · 现场录音", model.FormatObsTime(entry.ObservedAt), func() {
-														a.updateUI(func() {})
-													})
-												}
-											}
-										}
-										if len(entry.PhotoPaths) > 1 {
-											statusPill(c, fmt.Sprintf("%d 张照片", len(entry.PhotoPaths)), softPillColor(t), t.TextMuted)
-										}
-									})
-								}
-							})
+	ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
+		scroll := ui.Scroll(c.Key("j-timeline-scroll")).Fill()
+		if scroll.PullToRefresh(&a.journalRefresh) {
+			a.refreshJournalList()
+			a.journalRefresh.Refreshing = false
+		}
+		scroll.Children(func() {
+			ui.Column(c).FillWidth().Padding(10, 18, 112, 18).Gap(10).Children(func() {
+				if len(a.filteredEntries) == 0 {
+					tactileCard(c, t).Padding(34).Center().Gap(10).Children(func() {
+						tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
+							ui.Icon(c, iconJournal).FontSize(22).TextColor(t.TextMuted)
 						})
-						if row.Clicked() {
-							copyE := entry
-							a.journalActiveEntry = &copyE
-							a.journalDetailPager.Page = 0
-							a.router.Push("/journal/" + entry.ID)
-						}
+						ui.Text(c, "暂无观鸟日志").FontSize(16).FontWeight(600)
+						ui.Text(c, "点击右下角 + 记录今天的目击并点亮图鉴").FontSize(13).TextColor(t.TextMuted)
 					})
-				})
-			}
+					return
+				}
+
+				for i, item := range a.filteredEntries {
+					entry := item
+					tactileCard(c, t).Key("jsw-"+entry.ID).Clip().Children(func() {
+						mobile.SwipeRow(c, nil, mobile.SwipeOptions{
+							Trailing: []mobile.SwipeAction{{
+								Label:       "删除",
+								Destructive: true,
+								OnTap: func() {
+									a.jDeleteTargetID = entry.ID
+									a.jDeleteConfirm = true
+								},
+							}},
+						}, func() {
+							row := ui.Row(c).FillWidth().Padding(14, 16).Gap(12).AlignItems(ui.Center).
+								Role(ui.RoleButton).Label(entry.ComName + " 日志详情")
+							row.Children(func() {
+								if len(entry.PhotoPaths) > 0 {
+									p := entry.PhotoPaths[0]
+									a.loadLocalImageAsync(p)
+									if src, ok := a.localImgCache[p]; ok {
+										ui.Image(c, src).Size(62, 62).Fit(ui.Cover).Radius(12).Shrink(0).Label(entry.ComName)
+									} else {
+										tactileRecessedStyle(ui.Box(c).Size(62, 62), t, 12).Center().Shrink(0).Children(func() {
+											ui.Icon(c, iconImage).FontSize(20).TextColor(t.TextMuted)
+										})
+									}
+								}
+
+								ui.Column(c).Grow(1).Basis(0).Gap(3).Children(func() {
+									ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Baseline).Gap(8).Children(func() {
+										ui.Text(c, entry.ComName).FontSize(15).FontWeight(600).SingleLine().Grow(1)
+										statusPill(c, fmt.Sprintf("%d 只", max(1, entry.Count)), softPillColor(t), secondaryTextColor(t))
+									})
+									ui.Textf(c, "%s · %s", model.FormatObsTime(entry.ObservedAt), fallbackText(entry.Location, "野外地点")).
+										FontSize(12).TextColor(t.TextMuted).SingleLine()
+
+									if strings.TrimSpace(entry.Notes) != "" {
+										ui.Text(c, entry.Notes).FontSize(13).LineHeight(1.5).TextColor(secondaryTextColor(t)).MaxLines(2)
+									}
+
+									if entry.AudioPath != "" || len(entry.PhotoPaths) > 1 {
+										ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(2, 0, 0, 0).Children(func() {
+											if entry.AudioPath != "" {
+												pst := a.player.Status()
+												isThis := pst.SourceKey == entry.AudioPath
+												label := "现场录音"
+												if isThis && pst.Playing {
+													label = "暂停录音"
+												}
+												playPill := ui.Row(c.Key(fmt.Sprintf("jt-aud-%d", i))).Padding(4, 10).Radius(999).
+													Background(opticalAccentColor(t).Alpha(0.12)).Gap(4).AlignItems(ui.Center).Role(ui.RoleButton).Label(label)
+												playPill.Children(func() {
+													ic := iconPlay
+													if isThis && pst.Playing {
+														ic = iconPause
+													}
+													ui.Icon(c, ic).FontSize(10).TextColor(opticalAccentColor(t))
+													ui.Text(c, label).FontSize(11).FontWeight(500).TextColor(opticalAccentColor(t))
+												})
+												if playPill.Clicked() {
+													if isThis && pst.Active {
+														a.player.TogglePause()
+													} else {
+														a.player.PlayFile(entry.AudioPath, entry.ComName+" · 现场录音", model.FormatObsTime(entry.ObservedAt), func() {
+															a.updateUI(func() {})
+														})
+													}
+												}
+											}
+											if len(entry.PhotoPaths) > 1 {
+												statusPill(c, fmt.Sprintf("%d 张照片", len(entry.PhotoPaths)), softPillColor(t), t.TextMuted)
+											}
+										})
+									}
+								})
+							})
+							if row.Clicked() {
+								copyE := entry
+								a.journalActiveEntry = &copyE
+								a.journalDetailPager.Page = 0
+								a.router.Push("/journal/" + entry.ID)
+							}
+						})
+					})
+				}
+			})
 		})
+		scrollTopFadeScrim(c, t)
 	})
 }
 
@@ -371,98 +374,101 @@ func (a *AppState) buildLifelistGrid(c *ui.Context, t *ui.Theme, unlocked []mode
 		}
 	}
 
-	ui.Scroll(c.Key("ll-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
-		ui.Column(c).FillWidth().Padding(4, 18, 112, 18).Gap(12).Children(func() {
-			if len(visible) == 0 {
-				tactileCard(c, t).Padding(34).Center().Gap(10).Children(func() {
-					tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
-						ui.Icon(c, iconAward).FontSize(22).TextColor(t.TextMuted)
+	ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
+		ui.Scroll(c.Key("ll-scroll")).Fill().Children(func() {
+			ui.Column(c).FillWidth().Padding(10, 18, 112, 18).Gap(12).Children(func() {
+				if len(visible) == 0 {
+					tactileCard(c, t).Padding(34).Center().Gap(10).Children(func() {
+						tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
+							ui.Icon(c, iconAward).FontSize(22).TextColor(t.TextMuted)
+						})
+						ui.Text(c, "尚未解锁鸟种").FontSize(16).FontWeight(600)
+						ui.Text(c, "记录一条观鸟日志即可在此点亮物种").FontSize(13).TextColor(t.TextMuted)
 					})
-					ui.Text(c, "尚未解锁鸟种").FontSize(16).FontWeight(600)
-					ui.Text(c, "记录一条观鸟日志即可在此点亮物种").FontSize(13).TextColor(t.TextMuted)
-				})
-				return
-			}
+					return
+				}
 
-			for i := 0; i < len(visible); i += 2 {
-				rowIdx := i
-				ui.Row(c.Key(fmt.Sprintf("llrow-%d", rowIdx))).FillWidth().Gap(12).Children(func() {
-					for col := 0; col < 2; col++ {
-						idx := rowIdx + col
-						if idx >= len(visible) {
-							ui.Box(c).Grow(1).Basis(0)
-							continue
-						}
-						bird := visible[idx]
-						hasImg := bird.CoverPhotoPath != "" || a.speciesThumbURL(bird.SpeciesCode) != ""
-						tile := applyCardRimAndShadow(
-							ui.Box(c.Key("llcard-"+bird.SpeciesCode)).Grow(1).Basis(0).Height(196),
-							18, t,
-						).Clip().Role(ui.RoleButton).Label(bird.ComName)
-
-						tile.Children(func() {
+				for i := 0; i < len(visible); i += 2 {
+					rowIdx := i
+					ui.Row(c.Key(fmt.Sprintf("llrow-%d", rowIdx))).FillWidth().Gap(12).Children(func() {
+						for col := 0; col < 2; col++ {
+							idx := rowIdx + col
+							if idx >= len(visible) {
+								ui.Box(c).Grow(1).Basis(0)
+								continue
+							}
+							bird := visible[idx]
+							thumbURL := a.speciesThumbURL(bird.SpeciesCode)
+							var localSrc ui.ImageSource
+							var netSrc ui.ImageSource
 							if bird.CoverPhotoPath != "" {
 								a.loadLocalImageAsync(bird.CoverPhotoPath)
-								if src, ok := a.localImgCache[bird.CoverPhotoPath]; ok {
-									ui.Image(c, src).Fill().Fit(ui.Cover).Label(bird.ComName)
+								localSrc = a.localImgCache[bird.CoverPhotoPath]
+							} else if thumbURL != "" {
+								netSrc, _ = netimage.Load(c, thumbURL, netimage.Options{MaxSide: 380})
+							}
+							hasImg := localSrc != nil || netSrc != nil
+							tile := applyCardRimAndShadow(
+								ui.Box(c.Key("llcard-"+bird.SpeciesCode)).Grow(1).Basis(0).Height(196),
+								18, t,
+							).Clip().Role(ui.RoleButton).Label(bird.ComName)
+
+							tile.Children(func() {
+								if localSrc != nil {
+									ui.Image(c, localSrc).Fill().Fit(ui.Cover).Label(bird.ComName)
+								} else if netSrc != nil {
+									ui.Image(c, netSrc).Fill().Fit(ui.Cover).Role(ui.RoleImage)
+								} else {
+									skeletonBirdCard(c, 0, 34, t)
 								}
-							} else if thumbURL := a.speciesThumbURL(bird.SpeciesCode); thumbURL != "" {
-								netimage.Image(c, thumbURL, netimage.Options{
-									MaxSide:     380,
-									Fit:         ui.Cover,
-									Placeholder: t.Surface,
-								}).Fill()
-							} else {
-								ui.Box(c).Fill().Center().Children(func() {
-									ui.Icon(c, iconBird).FontSize(34).TextColor(t.TextMuted.Alpha(0.32))
+
+								if hasImg {
+									ui.Box(c).Absolute().Left(0).Bottom(0).Right(0).Height(88).PassThrough().
+										LinearGradient(ui.LinearGradient{
+											Angle: 180,
+											Stops: []ui.GradientStop{
+												{Color: ui.Transparent, At: 0},
+												{Color: ui.RGBA(8, 11, 17, 0.36), At: 0.45},
+												{Color: ui.RGBA(8, 11, 17, 0.86), At: 1.0},
+											},
+										})
+								}
+
+								ui.Textf(c, "%d 次", max(1, bird.TotalSightings)).
+									Absolute().Right(10).Top(10).Padding(3, 9).Radius(999).
+									FontSize(11).FontWeight(500).FontFeatures("tnum").
+									Background(ui.RGBA(0, 0, 0, 0.45)).TextColor(ui.RGB(255, 255, 255))
+
+								titleCol := t.Text
+								subCol := t.TextMuted
+								if hasImg {
+									titleCol = ui.RGB(255, 255, 255)
+									subCol = ui.RGBA(255, 255, 255, 0.80)
+								}
+								fam := bird.FamilyName
+								if tx, ok := a.taxonByCode[bird.SpeciesCode]; ok {
+									fam = model.FamilyZh(tx.FamilySciName, tx.FamilyComName)
+								}
+								ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(0, 12, 12, 12).Gap(2).PassThrough().Children(func() {
+									ui.Text(c, bird.ComName).FontSize(15).FontWeight(600).TextColor(titleCol).SingleLine()
+									ui.Text(c, fallbackText(fam, bird.FirstLocation)).FontSize(12).TextColor(subCol).SingleLine()
 								})
-							}
-
-							if hasImg {
-								ui.Box(c).Absolute().Left(0).Bottom(0).Right(0).Height(88).PassThrough().
-									LinearGradient(ui.LinearGradient{
-										Angle: 180,
-										Stops: []ui.GradientStop{
-											{Color: ui.Transparent, At: 0},
-											{Color: ui.RGBA(8, 11, 17, 0.36), At: 0.45},
-											{Color: ui.RGBA(8, 11, 17, 0.86), At: 1.0},
-										},
-									})
-							}
-
-							ui.Textf(c, "%d 次", max(1, bird.TotalSightings)).
-								Absolute().Right(10).Top(10).Padding(3, 9).Radius(999).
-								FontSize(11).FontWeight(500).FontFeatures("tnum").
-								Background(ui.RGBA(0, 0, 0, 0.45)).TextColor(ui.RGB(255, 255, 255))
-
-							titleCol := t.Text
-							subCol := t.TextMuted
-							if hasImg {
-								titleCol = ui.RGB(255, 255, 255)
-								subCol = ui.RGBA(255, 255, 255, 0.80)
-							}
-							fam := bird.FamilyName
-							if tx, ok := a.taxonByCode[bird.SpeciesCode]; ok {
-								fam = model.FamilyZh(tx.FamilySciName, tx.FamilyComName)
-							}
-							ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(0, 12, 12, 12).Gap(2).PassThrough().Children(func() {
-								ui.Text(c, bird.ComName).FontSize(15).FontWeight(600).TextColor(titleCol).SingleLine()
-								ui.Text(c, fallbackText(fam, bird.FirstLocation)).FontSize(12).TextColor(subCol).SingleLine()
 							})
-						})
-						if tile.Clicked() {
-							if _, ok := a.taxonByCode[bird.SpeciesCode]; ok {
-								a.OpenSpeciesInGuide(bird.SpeciesCode)
-							} else {
-								a.session.JournalQuery = bird.ComName
-								a.session.JournalSubTab = 0
-								a.refreshJournalList()
+							if tile.Clicked() {
+								if _, ok := a.taxonByCode[bird.SpeciesCode]; ok {
+									a.OpenSpeciesInGuide(bird.SpeciesCode)
+								} else {
+									a.session.JournalQuery = bird.ComName
+									a.session.JournalSubTab = 0
+									a.refreshJournalList()
+								}
 							}
 						}
-					}
-				})
-			}
+					})
+				}
+			})
 		})
+		scrollTopFadeScrim(c, t)
 	})
 }
 
