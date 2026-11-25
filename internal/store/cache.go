@@ -98,6 +98,16 @@ func (c *Cache) LoadTaxonomy(locale string, maxAge time.Duration) ([]model.Taxon
 	return taxa, true
 }
 
+// TaxonomyAge 返回分类名录缓存距离上次更新的时长；不存在则返回未缓存。
+func (c *Cache) TaxonomyAge(locale string) (time.Duration, bool) {
+	p := filepath.Join(c.dir, "taxonomy_"+locale+".json")
+	info, err := os.Stat(p)
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(info.ModTime()), true
+}
+
 // SaveTaxonomy 将 eBird 分类名录写入缓存目录。
 func (c *Cache) SaveTaxonomy(locale string, taxa []model.Taxon) error {
 	p := filepath.Join(c.dir, "taxonomy_"+locale+".json")
@@ -153,6 +163,66 @@ func (c *Cache) LoadSpeciesList(regionCode string, maxAge time.Duration) ([]stri
 func (c *Cache) SaveSpeciesList(regionCode string, codes []string) error {
 	p := filepath.Join(c.dir, "spplist_"+regionCode+".json")
 	return writeJSON(p, codes)
+}
+
+// SpeciesListAge 返回指定区域物种名录缓存的已存放时长；若不存在则返回 false。
+func (c *Cache) SpeciesListAge(regionCode string) (time.Duration, bool) {
+	p := filepath.Join(c.dir, "spplist_"+regionCode+".json")
+	info, err := os.Stat(p)
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(info.ModTime()), true
+}
+
+func safeMediaCacheName(speciesCode string) string {
+	base := filepath.Base(speciesCode)
+	if base == "" || base == "." || base == ".." {
+		return ""
+	}
+	return "media_" + base + ".json"
+}
+
+// LoadSpeciesMedia 读取本地缓存的图鉴鸟种媒体资料（照片、鸣声、百科摘要）。
+func (c *Cache) LoadSpeciesMedia(speciesCode string, maxAge time.Duration) (*model.SpeciesMedia, bool) {
+	name := safeMediaCacheName(speciesCode)
+	if name == "" {
+		return nil, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p := filepath.Join(c.dir, name)
+	info, err := os.Stat(p)
+	if err != nil || (maxAge > 0 && time.Since(info.ModTime()) > maxAge) {
+		return nil, false
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil, false
+	}
+	var out model.SpeciesMedia
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, false
+	}
+	if len(out.Photos) == 0 && len(out.Sounds) == 0 && out.Wiki == nil {
+		return nil, false
+	}
+	return &out, true
+}
+
+// SaveSpeciesMedia 持久化图鉴鸟种媒体资料以便详情页秒开。
+func (c *Cache) SaveSpeciesMedia(speciesCode string, media *model.SpeciesMedia) error {
+	if media == nil {
+		return nil
+	}
+	name := safeMediaCacheName(speciesCode)
+	if name == "" {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p := filepath.Join(c.dir, name)
+	return writeJSON(p, media)
 }
 
 // Stats 返回当前媒体缓存（含名录缓存）总字节数与文件数。

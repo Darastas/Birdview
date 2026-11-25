@@ -172,7 +172,7 @@ func (a *AppState) viewJournalHome(c *ui.Context, t *ui.Theme) {
 
 	ui.Box(c).Fill().Children(func() {
 		ui.Column(c).Fill().Children(func() {
-			ui.Column(c).FillWidth().Padding(16, 18, 10, 18).Gap(12).Children(func() {
+			ui.Column(c).FillWidth().Padding(immersiveTopPad(c, 16), 18, 10, 18).Gap(12).Children(func() {
 				ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, "日志").FontSize(26).FontWeight(600).LetterSpacing(-0.1).Role(ui.RoleHeading).Level(1)
 
@@ -224,8 +224,7 @@ func (a *AppState) viewJournalHome(c *ui.Context, t *ui.Theme) {
 
 		// 右下角立体浮雕圆形主按钮（避开底部 Liquid Glass 悬空导航栏）
 		if !a.journalSheetOpen {
-			_, _, bottom, _ := c.SafeArea()
-			fabBottom := max(float32(88), bottom+82)
+			fabBottom := dockClearancePad(c, 12)
 			fab := applySculptedPrimaryStyle(
 				ui.Box(c.Key("j-fab")).Size(54, 54).Radius(27).Center().
 					Absolute().Right(18).Bottom(fabBottom).
@@ -264,7 +263,7 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 			a.journalRefresh.Refreshing = false
 		}
 		scroll.Children(func() {
-			ui.Column(c).FillWidth().Padding(10, 18, 112, 18).Gap(10).Children(func() {
+			ui.Column(c).FillWidth().Padding(10, 18, dockClearancePad(c, 22), 18).Gap(10).Children(func() {
 				if len(a.filteredEntries) == 0 {
 					tactileCard(c, t).Padding(34).Center().Gap(10).Children(func() {
 						tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
@@ -386,7 +385,7 @@ func (a *AppState) buildLifelistGrid(c *ui.Context, t *ui.Theme, unlocked []mode
 
 	ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
 		ui.Scroll(c.Key("ll-scroll")).Fill().TrackScroll(&a.journalLifelistScroll).Children(func() {
-			ui.Column(c).FillWidth().Padding(10, 18, 112, 18).Gap(12).Children(func() {
+			ui.Column(c).FillWidth().Padding(10, 18, dockClearancePad(c, 22), 18).Gap(12).Children(func() {
 				if len(visible) == 0 {
 					tactileCard(c, t).Padding(34).Center().Gap(10).Children(func() {
 						tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
@@ -513,7 +512,7 @@ func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID str
 	}
 
 	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).FillWidth().Padding(14, 18, 10, 18).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).FillWidth().Padding(immersiveTopPad(c, 14), 18, 10, 18).Gap(8).AlignItems(ui.Center).Children(func() {
 			if tactileIconBtn(c, "jd-back-btn", "返回", iconBack, 36, t).Clicked() {
 				a.goBack()
 			}

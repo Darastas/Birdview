@@ -207,3 +207,41 @@ func TestCacheThumbIndex(t *testing.T) {
 		t.Fatalf("unexpected thumb index: %+v", got)
 	}
 }
+
+func TestCacheSpeciesMediaRoundTrip(t *testing.T) {
+	c, err := NewCache(t.TempDir(), 4*1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &model.SpeciesMedia{
+		SciName: "Alcedo atthis",
+		ComName: "普通翠鸟",
+		Photos: []model.MediaPhoto{
+			{URL: "https://example.com/large.jpg", ThumbURL: "https://example.com/medium.jpg", Source: "iNaturalist"},
+		},
+		Sounds: []model.MediaSound{
+			{URL: "https://example.com/call.mp3", Type: "野外实录鸟鸣", Source: "iNaturalist"},
+		},
+	}
+	if err := c.SaveSpeciesMedia("comkin1", in); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := c.LoadSpeciesMedia("comkin1", 24*time.Hour)
+	if !ok || got == nil || len(got.Photos) != 1 || len(got.Sounds) != 1 {
+		t.Fatalf("expected loaded species media, ok=%v got=%+v", ok, got)
+	}
+	if _, ok := c.LoadSpeciesMedia("missing", 24*time.Hour); ok {
+		t.Fatal("expected missing species cache to return false")
+	}
+	p := filepath.Join(c.dir, "media_comkin1.json")
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(p, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.LoadSpeciesMedia("comkin1", 24*time.Hour); ok {
+		t.Fatal("expected expired species cache to be rejected for maxAge=24h")
+	}
+	if _, ok := c.LoadSpeciesMedia("comkin1", 7*24*time.Hour); !ok {
+		t.Fatal("expected 48h-old cache still accepted within 7d limit")
+	}
+}

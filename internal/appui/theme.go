@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -71,7 +70,23 @@ func applyAppTheme(c *ui.Context) *ui.Theme {
 		t.Danger = ui.Hex("#EF4444")
 	}
 	c.SetTheme(&t)
+	ui.SetImmersive(c, true)
+	c.Root().Background(t.Background)
 	return &t
+}
+
+// immersiveTopPad 返回沉浸式全面屏模式下避让顶部状态栏的上边距。
+func immersiveTopPad(c *ui.Context, base float32) float32 {
+	if top, _, _, _ := c.SafeArea(); top > 0 {
+		return top + 6
+	}
+	return base
+}
+
+// dockClearancePad 返回列表或悬浮按钮避让底部悬浮导航底座的底边距。
+func dockClearancePad(c *ui.Context, extra float32) float32 {
+	_, _, bottom, _ := c.SafeArea()
+	return max(float32(10), bottom+4) + 62 + extra
 }
 
 // platformFontFamily 返回兼顾中英文几何比例与高平滑度渲染的跨平台现代无衬线字体栈。
@@ -360,7 +375,7 @@ func renderSegmentItems(c *ui.Context, strip ui.Element, key string, selected *i
 }
 
 // floatingGlassDock 绘制悬浮在内容之上的自研光学液态玻璃胶囊底部导航栏（含底部卷动边缘渐变）。
-func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme) bool {
+func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme, obscured bool) bool {
 	_, _, bottom, _ := c.SafeArea()
 	if bottom > keyboardInsetThreshold {
 		return false
@@ -376,20 +391,20 @@ func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme) bool {
 		{label: "设置", icon: iconNavSettings},
 	}
 
-	edgeBg := ui.Hex("#F7F8FB")
-	if t.Dark {
-		edgeBg = ui.Hex("#07090E")
-	}
-	// 底部柔化卷动渐隐边缘（让文字滑入悬空底座前自然淡出）
-	ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(92 + bottom).PassThrough().
-		Material(glass.ScrollEdge{Bottom: true, Background: edgeBg})
-
-	dockBottom := max(float32(12), bottom+6)
+	dockBottom := max(float32(10), bottom+4)
 	changed := false
 	dock := ui.Row(c.Key("min-bottom-bar")).Absolute().Left(16).Right(16).Bottom(dockBottom).
 		Height(62).Padding(5, 6).Radius(31).
-		Material(floatingBarGlass(t.Dark)).
 		Role(ui.RoleTabList)
+	if obscured {
+		if t.Dark {
+			dock.Background(ui.Hex("#161B26")).Border(1, ui.RGBA(255, 255, 255, 0.10))
+		} else {
+			dock.Background(ui.Hex("#FFFFFF")).Border(1, ui.RGBA(15, 23, 42, 0.08))
+		}
+	} else {
+		dock.Material(floatingBarGlass(t.Dark))
+	}
 	if t.Dark {
 		dock.
 			Shadow(0, 14, 34, -4, ui.RGBA(0, 0, 0, 0.58)).

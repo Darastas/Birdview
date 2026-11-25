@@ -24,10 +24,41 @@ type Client struct {
 }
 
 // NewClient 创建使用系统代理、默认超时 30 秒的 API 客户端。
+func newPooledTransport() http.RoundTripper {
+	base := netproxy.Transport()
+	if tr, ok := any(base).(*http.Transport); ok && tr != nil {
+		cloned := tr.Clone()
+		cloned.MaxIdleConns = 128
+		cloned.MaxIdleConnsPerHost = 32
+		cloned.MaxConnsPerHost = 0
+		cloned.IdleConnTimeout = 90 * time.Second
+		cloned.ForceAttemptHTTP2 = true
+		cloned.TLSHandshakeTimeout = 5 * time.Second
+		cloned.ResponseHeaderTimeout = 10 * time.Second
+		return cloned
+	}
+	return base
+}
+
+// ImageHTTPClient 返回复用连接池且针对图片拉取优化超时的 HTTP 客户端。
+func (c *Client) ImageHTTPClient() *http.Client {
+	var tr http.RoundTripper
+	if c != nil && c.HTTP != nil {
+		tr = c.HTTP.Transport
+	}
+	if tr == nil {
+		tr = newPooledTransport()
+	}
+	return &http.Client{
+		Transport: tr,
+		Timeout:   15 * time.Second,
+	}
+}
+
 func NewClient() *Client {
 	return &Client{
 		HTTP: &http.Client{
-			Transport: netproxy.Transport(),
+			Transport: newPooledTransport(),
 			Timeout:   30 * time.Second,
 		},
 		EBirdBaseURL: "https://api.ebird.org/v2",

@@ -41,13 +41,13 @@ func settingsRow(c *ui.Context, key, title, value string, t *ui.Theme, trailing 
 
 func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Children(func() {
-		ui.Box(c).FillWidth().Padding(16, 18, 10, 18).Children(func() {
+		ui.Box(c).FillWidth().Padding(immersiveTopPad(c, 16), 18, 10, 18).Children(func() {
 			ui.Text(c, "设置").FontSize(26).FontWeight(600).LetterSpacing(-0.1).Role(ui.RoleHeading).Level(1)
 		})
 
 		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
 			ui.Scroll(c.Key("settings-scroll")).Fill().Children(func() {
-				ui.Column(c).FillWidth().Padding(10, 18, 106, 18).Gap(14).Children(func() {
+				ui.Column(c).FillWidth().Padding(10, 18, dockClearancePad(c, 24), 18).Gap(14).Children(func() {
 					// 1. 数据接口与密钥
 					tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
 						if settingsRow(c, "set-row-ebird", "eBird API Key", maskKeyShort(a.store.LoadEbirdKey()), t, nil).Clicked() {

@@ -335,7 +335,7 @@ func (a *AppState) OpenExploreHotspot(h model.Hotspot) {
 
 func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Children(func() {
-		ui.Column(c).FillWidth().Padding(16, 18, 10, 18).Gap(12).Children(func() {
+		ui.Column(c).FillWidth().Padding(immersiveTopPad(c, 16), 18, 10, 18).Gap(12).Children(func() {
 			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "探索").FontSize(26).FontWeight(600).LetterSpacing(-0.1).Role(ui.RoleHeading).Level(1)
 
@@ -368,7 +368,7 @@ func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 				a.LoadExploreData()
 			}
 			scroll.Children(func() {
-				ui.Column(c).FillWidth().Padding(12, 18, 106, 18).Gap(14).Children(func() {
+				ui.Column(c).FillWidth().Padding(12, 18, dockClearancePad(c, 22), 18).Gap(14).Children(func() {
 					switch a.session.ExploreSubTab {
 					case 0:
 						a.buildExplorePhotoFeed(c, t)
@@ -659,12 +659,17 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 	ui.Scroll(c.Key("ep-scroll")).Fill().Children(func() {
 		ui.Column(c).FillWidth().Padding(0, 0, 44, 0).Gap(0).Children(func() {
 			count := len(item.Photos)
-			ui.Box(c).FillWidth().Height(330).Background(t.Surface).Children(func() {
+			heroH := float32(330) + top
+			ui.Box(c).FillWidth().Height(heroH).Background(t.Surface).Children(func() {
 				mobile.PageView(c, &a.regPhotoPager, count, func(i int) {
 					slide := ui.Box(c.Key(fmt.Sprintf("fpslide-%d", i))).Fill().
 						Role(ui.RoleButton).Label("点击放大查看实拍图")
 					slide.Children(func() {
-						src, _ := netimage.Load(c, item.Photos[i].URL, netimage.Options{MaxSide: 1200})
+						photo := item.Photos[i]
+						src, _ := netimage.Load(c, photo.URL, netimage.Options{MaxSide: 1200})
+						if src == nil && photo.ThumbURL != "" {
+							src, _ = netimage.Load(c, photo.ThumbURL, netimage.Options{MaxSide: 500})
+						}
 						if src != nil {
 							ui.Image(c, src).Fill().Fit(ui.Cover).Role(ui.RoleImage)
 						} else {
@@ -676,7 +681,7 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 					}
 				}).Fill()
 
-				ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(76).PassThrough().LinearGradient(ui.LinearGradient{
+				ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(76 + top).PassThrough().LinearGradient(ui.LinearGradient{
 					From:  ui.RGBA(0, 0, 0, 0.34),
 					To:    ui.RGBA(0, 0, 0, 0),
 					Angle: 180,
@@ -805,7 +810,7 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 	}
 
 	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).FillWidth().Padding(14, 18, 10, 18).Gap(10).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).FillWidth().Padding(immersiveTopPad(c, 14), 18, 10, 18).Gap(10).AlignItems(ui.Center).Children(func() {
 			if tactileIconBtn(c, "ec-back-btn", "返回", iconBack, 36, t).Clicked() {
 				a.goBack()
 			}
@@ -942,7 +947,7 @@ func (a *AppState) viewExploreHotspotDetail(c *ui.Context, t *ui.Theme, locID st
 	busy := a.hsObsBusy[spot.LocID]
 
 	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).FillWidth().Padding(14, 18, 10, 18).Gap(10).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).FillWidth().Padding(immersiveTopPad(c, 14), 18, 10, 18).Gap(10).AlignItems(ui.Center).Children(func() {
 			if tactileIconBtn(c, "es-back-btn", "返回", iconBack, 36, t).Clicked() {
 				a.goBack()
 			}

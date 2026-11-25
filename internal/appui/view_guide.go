@@ -24,101 +24,145 @@ func (a *AppState) loadTaxonomyAsync(forceRefresh bool) {
 	a.invalidateUI()
 
 	go func() {
+		const staleLimit = 30 * 24 * time.Hour
+		const freshLimit = 24 * time.Hour
+
 		var taxa []model.Taxon
-		var err error
-
-		if !forceRefresh && a.cache != nil {
-			if cached, ok := a.cache.LoadTaxonomy("zh_SIM", 24*time.Hour); ok {
-				taxa = cached
-			}
-		}
-		if len(taxa) == 0 {
-			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-			taxa, err = a.client.FetchTaxonomy(ctx, "zh_SIM")
-			cancel()
-			if err == nil && a.cache != nil && len(taxa) > 0 {
-				_ = a.cache.SaveTaxonomy("zh_SIM", taxa)
-			}
-		}
-
-		if err != nil {
-			a.updateUI(func() {
-				a.taxaLoading = false
-				a.guideRefresh.Refreshing = false
-				a.taxaErr = fmt.Sprintf("加载鸟类名录失败: %v", err)
-			})
-			return
-		}
-
 		defaultRegion := a.store.Settings().DefaultRegion
 		cachedChina := make(map[string]bool)
 		cachedRegion := make(map[string]bool)
+		needRevalidate := forceRefresh
+
 		if !forceRefresh && a.cache != nil {
-			if codes, ok := a.cache.LoadSpeciesList("CN", 24*time.Hour); ok {
-				for _, c := range codes {
-					cachedChina[c] = true
+			if cached, ok := a.cache.LoadTaxonomy("zh_SIM", staleLimit); ok {
+				taxa = cached
+				if age, hasAge := a.cache.TaxonomyAge("zh_SIM"); !hasAge || age > freshLimit {
+					needRevalidate = true
 				}
+			} else {
+				needRevalidate = true
 			}
-			if codes, ok := a.cache.LoadSpeciesList(defaultRegion, 24*time.Hour); ok {
-				for _, c := range codes {
-					cachedRegion[c] = true
+			if codes, ok := a.cache.LoadSpeciesList("CN", staleLimit); ok {
+				for _, code := range codes {
+					cachedChina[code] = true
 				}
+				if age, hasAge := a.cache.SpeciesListAge("CN"); !hasAge || age > freshLimit {
+					needRevalidate = true
+				}
+			} else {
+				needRevalidate = true
 			}
+			if codes, ok := a.cache.LoadSpeciesList(defaultRegion, staleLimit); ok {
+				for _, code := range codes {
+					cachedRegion[code] = true
+				}
+				if age, hasAge := a.cache.SpeciesListAge(defaultRegion); !hasAge || age > freshLimit {
+					needRevalidate = true
+				}
+			} else {
+				needRevalidate = true
+			}
+		} else {
+			needRevalidate = true
 		}
 
-		a.updateUI(func() {
-			a.SetTaxonomy(taxa, cachedChina, cachedRegion, defaultRegion)
-			key := a.store.LoadEbirdKey()
-			if key == "" || (len(cachedChina) > 0 && len(cachedRegion) > 0) {
+		key := a.store.LoadEbirdKey()
+		if len(taxa) > 0 {
+			a.updateUI(func() {
+				a.SetTaxonomy(taxa, cachedChina, cachedRegion, defaultRegion)
 				a.taxaLoading = false
 				a.guideRefresh.Refreshing = false
 				a.refreshStorageStats()
+			})
+			if !needRevalidate {
+				return
 			}
-		})
-
-		key := a.store.LoadEbirdKey()
-		if key == "" || (!forceRefresh && len(cachedChina) > 0 && len(cachedRegion) > 0) {
-			return
 		}
 
-		var wg sync.WaitGroup
-		chinaSet := make(map[string]bool)
-		regionSet := make(map[string]bool)
-		wg.Add(2)
+		var (
+			wg        sync.WaitGroup
+			mu        sync.Mutex
+			netTaxa   []model.Taxon
+			taxaErr   error
+			chinaSet  = make(map[string]bool)
+			regionSet = make(map[string]bool)
+		)
+
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			if codes, e := a.client.FetchSpeciesList(ctx, key, "CN"); e == nil && len(codes) > 0 {
-				if a.cache != nil {
-					_ = a.cache.SaveSpeciesList("CN", codes)
-				}
-				for _, code := range codes {
-					chinaSet[code] = true
-				}
+			defer cancel()
+			fetched, err := a.client.FetchTaxonomy(ctx, "zh_SIM")
+			mu.Lock()
+			netTaxa = fetched
+			taxaErr = err
+			mu.Unlock()
+			if err == nil && a.cache != nil && len(fetched) > 0 {
+				_ = a.cache.SaveTaxonomy("zh_SIM", fetched)
 			}
-			cancel()
 		}()
-		go func() {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			if codes, e := a.client.FetchSpeciesList(ctx, key, defaultRegion); e == nil && len(codes) > 0 {
-				if a.cache != nil {
-					_ = a.cache.SaveSpeciesList(defaultRegion, codes)
+
+		if key != "" {
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 18*time.Second)
+				defer cancel()
+				if codes, e := a.client.FetchSpeciesList(ctx, key, "CN"); e == nil && len(codes) > 0 {
+					if a.cache != nil {
+						_ = a.cache.SaveSpeciesList("CN", codes)
+					}
+					mu.Lock()
+					for _, code := range codes {
+						chinaSet[code] = true
+					}
+					mu.Unlock()
 				}
-				for _, code := range codes {
-					regionSet[code] = true
+			}()
+			go func() {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 18*time.Second)
+				defer cancel()
+				if codes, e := a.client.FetchSpeciesList(ctx, key, defaultRegion); e == nil && len(codes) > 0 {
+					if a.cache != nil {
+						_ = a.cache.SaveSpeciesList(defaultRegion, codes)
+					}
+					mu.Lock()
+					for _, code := range codes {
+						regionSet[code] = true
+					}
+					mu.Unlock()
 				}
-			}
-			cancel()
-		}()
+			}()
+		}
 		wg.Wait()
 
+		finalTaxa := taxa
+		if len(netTaxa) > 0 {
+			finalTaxa = netTaxa
+		}
+		if len(finalTaxa) == 0 && taxaErr != nil {
+			a.updateUI(func() {
+				a.taxaLoading = false
+				a.guideRefresh.Refreshing = false
+				a.taxaErr = fmt.Sprintf("加载鸟类名录失败: %v", taxaErr)
+			})
+			return
+		}
+		if len(chinaSet) == 0 {
+			chinaSet = cachedChina
+		}
+		if len(regionSet) == 0 {
+			regionSet = cachedRegion
+		}
+
 		a.updateUI(func() {
-			if len(chinaSet) > 0 || len(regionSet) > 0 {
+			if len(finalTaxa) > 0 {
 				if len(chinaSet) > 0 && a.session.GuideScope == 2 && a.session.GuideQuery == "" {
 					a.session.GuideScope = 0
 				}
-				a.SetTaxonomy(taxa, chinaSet, regionSet, defaultRegion)
+				a.SetTaxonomy(finalTaxa, chinaSet, regionSet, defaultRegion)
 			}
 			a.taxaLoading = false
 			a.guideRefresh.Refreshing = false
@@ -304,10 +348,59 @@ func (a *AppState) ensureGuideMediaLoaded(tx model.Taxon) {
 	a.guideMediaBusy[tx.SpeciesCode] = true
 	xcKey := a.store.LoadXenoKey()
 
+	preloadMediaPhotos := func(m *model.SpeciesMedia) {
+		if m == nil || len(m.Photos) == 0 {
+			return
+		}
+		var urls []string
+		for _, p := range m.Photos {
+			if p.ThumbURL != "" {
+				urls = append(urls, p.ThumbURL)
+			}
+			if p.URL != "" {
+				urls = append(urls, p.URL)
+			}
+		}
+		if len(urls) > 0 {
+			netimage.Preload(urls...)
+		}
+	}
+
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 22*time.Second)
-		media := a.client.FetchSpeciesGuideMedia(ctx, tx.SciName, tx.ComName, xcKey)
+		if a.cache != nil {
+			if cached, ok := a.cache.LoadSpeciesMedia(tx.SpeciesCode, 7*24*time.Hour); ok {
+				preloadMediaPhotos(cached)
+				a.updateUI(func() {
+					delete(a.guideMediaBusy, tx.SpeciesCode)
+					a.guideMediaMap[tx.SpeciesCode] = cached
+					if len(cached.Photos) > 0 {
+						a.thumbMap[tx.SpeciesCode] = fallbackText(cached.Photos[0].ThumbURL, cached.Photos[0].URL)
+					}
+					a.refreshStorageStats()
+				})
+				return
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		media := a.client.FetchSpeciesGuideMediaProgressive(ctx, tx.SciName, tx.ComName, xcKey, func(partial *model.SpeciesMedia) {
+			if partial == nil || (len(partial.Photos) == 0 && len(partial.Sounds) == 0 && partial.Wiki == nil) {
+				return
+			}
+			preloadMediaPhotos(partial)
+			a.updateUI(func() {
+				a.guideMediaMap[tx.SpeciesCode] = partial
+				if len(partial.Photos) > 0 && a.thumbMap[tx.SpeciesCode] == "" {
+					a.thumbMap[tx.SpeciesCode] = fallbackText(partial.Photos[0].ThumbURL, partial.Photos[0].URL)
+				}
+			})
+		})
 		cancel()
+
+		if a.cache != nil && media != nil && (len(media.Photos) > 0 || len(media.Sounds) > 0 || media.Wiki != nil) {
+			_ = a.cache.SaveSpeciesMedia(tx.SpeciesCode, media)
+		}
+		preloadMediaPhotos(media)
 
 		a.updateUI(func() {
 			delete(a.guideMediaBusy, tx.SpeciesCode)
@@ -326,10 +419,10 @@ func (a *AppState) ensureGuideMediaLoaded(tx model.Taxon) {
 
 func (a *AppState) speciesThumbURL(code string) string {
 	if u := a.thumbMap[code]; u != "" {
-		return u
+		return strings.Replace(u, "/medium.", "/small.", 1)
 	}
 	if m, ok := a.guideMediaMap[code]; ok && len(m.Photos) > 0 {
-		return fallbackText(m.Photos[0].ThumbURL, m.Photos[0].URL)
+		return strings.Replace(fallbackText(m.Photos[0].ThumbURL, m.Photos[0].URL), "/medium.", "/small.", 1)
 	}
 	return ""
 }
@@ -338,7 +431,7 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 	hasFilter := (a.guideOrder != "" && a.guideOrder != "全部目") || (a.guideFamily != "" && a.guideFamily != "全部科")
 
 	ui.Column(c).Fill().Children(func() {
-		ui.Column(c).FillWidth().Padding(16, 18, 10, 18).Gap(12).Children(func() {
+		ui.Column(c).FillWidth().Padding(immersiveTopPad(c, 16), 18, 10, 18).Gap(12).Children(func() {
 			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "图鉴").FontSize(26).FontWeight(600).LetterSpacing(-0.1).Role(ui.RoleHeading).Level(1)
 
@@ -455,7 +548,7 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 				}
 				padBottom := float32(12)
 				if row.Index == rowCount-1 {
-					padBottom = 104
+					padBottom = dockClearancePad(c, 22)
 				}
 				ui.Row(rc).FillWidth().Padding(padTop, 18, padBottom, 18).Gap(12).AlignItems(ui.Start).Children(func() {
 					for col := 0; col < 2; col++ {
@@ -797,7 +890,11 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 						slide := ui.Box(c.Key(fmt.Sprintf("gslide-%d", i))).Fill().
 							Role(ui.RoleButton).Label("点击放大图片")
 						slide.Children(func() {
-							src, _ := netimage.Load(c, media.Photos[i].URL, netimage.Options{MaxSide: 1200})
+							photo := media.Photos[i]
+							src, _ := netimage.Load(c, photo.URL, netimage.Options{MaxSide: 1200})
+							if src == nil && photo.ThumbURL != "" {
+								src, _ = netimage.Load(c, photo.ThumbURL, netimage.Options{MaxSide: 500})
+							}
 							if src != nil {
 								ui.Image(c, src).Fill().Fit(ui.Cover).Role(ui.RoleImage)
 							} else {
@@ -817,7 +914,7 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 				}
 
 				if count > 0 {
-					ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(84).PassThrough().LinearGradient(ui.LinearGradient{
+					ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(84 + top).PassThrough().LinearGradient(ui.LinearGradient{
 						From:  ui.RGBA(0, 0, 0, 0.34),
 						To:    ui.RGBA(0, 0, 0, 0),
 						Angle: 180,

@@ -4,6 +4,8 @@ go 1.27.3
 
 require github.com/egoist/mygo v0.10.0
 
+replace github.com/egoist/mygo => ./third_party/mygo
+
 require (
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
 	github.com/cloudflare/circl v1.6.2 // indirect

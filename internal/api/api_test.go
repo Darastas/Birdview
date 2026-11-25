@@ -5,7 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/Darastas/Birdview/internal/model"
 )
 
 func TestEbirdClientAndLocale(t *testing.T) {
@@ -155,5 +159,73 @@ func TestCleanEBirdTextAndChecklistUnescape(t *testing.T) {
 	}
 	if detail.UserDisplayName != "观鸟人&队友" || len(detail.Obs) != 1 || detail.Obs[0].Comments != want {
 		t.Fatalf("unexpected unescaped checklist detail: %+v", detail)
+	}
+}
+
+func TestFetchSpeciesGuideMediaProgressiveDecouplesSlowWiki(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/taxa":
+			w.Write([]byte(`{"results":[{"id":21,"name":"Alcedo atthis","observations_count":100,"default_photo":{"medium_url":"https://static.inaturalist.org/photos/123/medium.jpg","attribution":"A","license_code":"cc-by"},"taxon_photos":[{"photo":{"medium_url":"https://static.inaturalist.org/photos/456/medium.jpg","attribution":"B"}}]}]}`))
+		case r.URL.Path == "/observations":
+			w.Write([]byte(`{"results":[{"user":{"name":"Rec1"},"place_guess":"Beijing","sounds":[{"file_url":"https://example.com/call.mp3","file_content_type":"audio/mpeg","license_code":"cc0"}]}]}`))
+		case strings.HasPrefix(r.URL.Path, "/page/summary/"):
+			select {
+			case <-time.After(5 * time.Second):
+				w.Write([]byte(`{"title":"普通翠鸟","extract":"late wiki"}`))
+			case <-r.Context().Done():
+				return
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient()
+	c.INatBaseURL = srv.URL
+	c.WikiBaseURL = srv.URL
+
+	// 1. 列表缩略图应自动将 /medium. 转为轻量 /small.
+	thumb, err := c.FetchSpeciesThumb(context.Background(), "Alcedo atthis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thumb != "https://static.inaturalist.org/photos/123/small.jpg" {
+		t.Fatalf("expected /small.jpg thumb conversion, got %q", thumb)
+	}
+
+	// 2. 渐进拉取应在百科超时前（<500ms）先吐出照片与鸣声，并在约 3.5s 独立放弃卡顿百科而非等足 5s
+	start := time.Now()
+	var mu sync.Mutex
+	var partialPhotosAndSoundsAt time.Duration
+	var partialPhotos int
+	var partialSounds int
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	finalMedia := c.FetchSpeciesGuideMediaProgressive(ctx, "Alcedo atthis", "普通翠鸟", "", func(partial *model.SpeciesMedia) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(partial.Photos) > partialPhotos {
+			partialPhotos = len(partial.Photos)
+		}
+		if len(partial.Sounds) > partialSounds {
+			partialSounds = len(partial.Sounds)
+		}
+		if len(partial.Photos) >= 2 && len(partial.Sounds) >= 1 && partialPhotosAndSoundsAt == 0 {
+			partialPhotosAndSoundsAt = time.Since(start)
+		}
+	})
+	totalElapsed := time.Since(start)
+
+	if partialPhotosAndSoundsAt == 0 || partialPhotosAndSoundsAt > 800*time.Millisecond {
+		t.Fatalf("expected fast partial photos+sounds in <800ms despite 5s slow wiki, got %v (photos=%d sounds=%d)", partialPhotosAndSoundsAt, partialPhotos, partialSounds)
+	}
+	if totalElapsed >= 4700*time.Millisecond {
+		t.Fatalf("expected slow wiki canceled by 3.5s budget instead of blocking 5s, elapsed=%v", totalElapsed)
+	}
+	if finalMedia == nil || len(finalMedia.Photos) < 2 || len(finalMedia.Sounds) < 1 {
+		t.Fatalf("expected iNaturalist photos & sounds preserved, got %+v", finalMedia)
 	}
 }

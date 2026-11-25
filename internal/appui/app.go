@@ -179,6 +179,13 @@ type AppState struct {
 	cacheStatsBytes   int64
 	cacheStatsFiles   int
 	localDataBytes    int64
+	lastBarStyle      mygo.BarStyle
+}
+
+func (a *AppState) hasModalOpen() bool {
+	return a.guideFilterSheet || a.guideScopeSheet || a.regRegionSheetOpen ||
+		a.journalSheetOpen || a.journalPhotoSheet || a.exportSheetOpen ||
+		a.jDeleteConfirm || a.zoomOpen || a.setKeySheetOpen || a.setAboutSheetOpen
 }
 
 // NewAppState 初始化移动端应用状态。
@@ -217,7 +224,7 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client, sess *
 		regionCodes:      make(map[string]bool),
 		thumbMap:         thumbs,
 		thumbTried:       make(map[string]bool),
-		thumbSem:         make(chan struct{}, 4),
+		thumbSem:         make(chan struct{}, 12),
 		guideOrder:       "全部目",
 		guideFamily:      "全部科",
 		guideMediaMap:    make(map[string]*model.SpeciesMedia),
@@ -233,7 +240,11 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client, sess *
 		hsObsBusy:        make(map[string]bool),
 		jDraftCount:      1,
 	}
-	a.router.Animation = &ui.Snappy
+	a.router.Animation = &ui.Animation{Spring: ui.SpringOptions{
+		Duration:  300 * time.Millisecond,
+		Bounce:    0,
+		Precision: 0.5,
+	}}
 	a.syncSettingsDraft()
 	a.refreshJournalList()
 	a.refreshStorageStats()
@@ -339,6 +350,17 @@ func (a *AppState) refreshStorageStats() {
 // View 是移动端根视图函数（遵守每帧只声明构建的规则）。
 func (a *AppState) View(c *ui.Context) {
 	t := applyAppTheme(c)
+	modalOpen := a.hasModalOpen()
+
+	wantBarStyle := mygo.BarStyleDark
+	curPath := a.router.Path()
+	if a.zoomOpen || t.Dark || (!modalOpen && (strings.HasPrefix(curPath, "/guide/") || strings.HasPrefix(curPath, "/explore/photo/"))) {
+		wantBarStyle = mygo.BarStyleLight
+	}
+	if wantBarStyle != a.lastBarStyle {
+		a.lastBarStyle = wantBarStyle
+		mygo.SystemBars.SetStyle(wantBarStyle)
+	}
 
 	if a.pendingToast != "" {
 		c.Toast(a.pendingToast)
@@ -386,9 +408,9 @@ func (a *AppState) View(c *ui.Context) {
 				})
 			})
 
-			a.buildMiniAudioBar(c, t, rootView)
+			a.buildMiniAudioBar(c, t, rootView, modalOpen)
 
-			if rootView && floatingGlassDock(c, &a.session.Tab, t) {
+			if rootView && floatingGlassDock(c, &a.session.Tab, t, modalOpen) {
 				a.SelectTab(a.session.Tab)
 			}
 		})
@@ -406,7 +428,7 @@ func (a *AppState) View(c *ui.Context) {
 	a.viewPhotoZoomOverlay(c, t)
 }
 
-func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme, aboveDock bool) {
+func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme, aboveDock, obscured bool) {
 	st := a.player.Status()
 	if !st.Active {
 		return
@@ -415,14 +437,22 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme, aboveDock bool)
 		c.After(120 * time.Millisecond)
 	}
 	_, _, bottom, _ := c.SafeArea()
-	barBottom := max(float32(14), bottom+10)
+	barBottom := max(float32(10), bottom+4)
 	if aboveDock && bottom <= keyboardInsetThreshold {
-		barBottom = max(float32(84), bottom+78)
+		barBottom = dockClearancePad(c, 6)
 	}
 
 	card := ui.Column(c.Key("mini-audio-bar")).Absolute().Left(16).Right(16).Bottom(barBottom).
-		Radius(28).Clip().
-		Material(floatingBarGlass(t.Dark))
+		Radius(28).Clip()
+	if obscured {
+		if t.Dark {
+			card.Background(ui.Hex("#161B26")).Border(1, ui.RGBA(255, 255, 255, 0.10))
+		} else {
+			card.Background(ui.Hex("#FFFFFF")).Border(1, ui.RGBA(15, 23, 42, 0.08))
+		}
+	} else {
+		card.Material(floatingBarGlass(t.Dark))
+	}
 	if t.Dark {
 		card.Shadow(0, 10, 26, -4, ui.RGBA(0, 0, 0, 0.5))
 	} else {
@@ -596,12 +626,25 @@ func (a *AppState) viewPhotoZoomOverlay(c *ui.Context, t *ui.Theme) {
 		a.zoomLastPage = a.zoomPager.Page
 		a.zoomState.Reset()
 	}
+	if len(a.zoomPhotos) > 1 {
+		var urls []string
+		for _, idx := range []int{a.zoomPager.Page, a.zoomPager.Page - 1, a.zoomPager.Page + 1} {
+			if idx >= 0 && idx < len(a.zoomPhotos) {
+				if u := a.zoomPhotos[idx].URL; u != "" {
+					urls = append(urls, u)
+				}
+			}
+		}
+		if len(urls) > 0 {
+			netimage.Preload(urls...)
+		}
+	}
 	top, _, bottom, _ := c.SafeArea()
 
 	ui.Overlay(c, func() {
 		bg := ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
 			Background(ui.Hex("#000000")).Modal()
-		if bg.OverlayShortcut(0, ui.KeyEscape) {
+		if bg.OverlayShortcut(0, ui.KeyEscape) || bg.OverlayShortcut(0, ui.KeyBack) {
 			a.zoomOpen = false
 		}
 		bg.Children(func() {
@@ -648,6 +691,9 @@ func (a *AppState) renderZoomSlide(c *ui.Context, i int) {
 	if len(a.zoomPhotos) > 0 && i < len(a.zoomPhotos) {
 		p := a.zoomPhotos[i]
 		src, _ := netimage.Load(c, p.URL, netimage.Options{MaxSide: 1800})
+		if src == nil && p.ThumbURL != "" {
+			src, _ = netimage.Load(c, p.ThumbURL, netimage.Options{MaxSide: 500})
+		}
 		if src != nil {
 			ui.Image(c, src).Fit(ui.Contain).Fill().Label(a.zoomTitle)
 			return

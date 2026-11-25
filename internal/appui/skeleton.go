@@ -7,14 +7,30 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func shimmerPhase() float32 {
+func shimmerPhaseAt(now time.Time) float32 {
 	const periodNs = int64(1350 * time.Millisecond)
-	return float32(time.Now().UnixNano()%periodNs) / float32(periodNs)
+	ns := now.UnixNano() % periodNs
+	if ns < 0 {
+		ns += periodNs
+	}
+	return float32(ns) / float32(periodNs)
+}
+
+func birdHopPhaseAt(now time.Time) float32 {
+	const periodNs = int64(1050 * time.Millisecond)
+	ns := now.UnixNano() % periodNs
+	if ns < 0 {
+		ns += periodNs
+	}
+	return float32(ns) / float32(periodNs)
+}
+
+func shimmerPhase() float32 {
+	return shimmerPhaseAt(time.Now())
 }
 
 func birdHopPhase() float32 {
-	const periodNs = int64(1050 * time.Millisecond)
-	return float32(time.Now().UnixNano()%periodNs) / float32(periodNs)
+	return birdHopPhaseAt(time.Now())
 }
 
 // drawShimmerRect 绘制 108° 斜向流畅冷灰渐变扫光骨架底板。
@@ -51,40 +67,45 @@ func drawShimmerRect(p *ui.Painter, r ui.Rect, radius float32, phase float32, da
 
 // skeletonShimmerBox 构建带斜向灰色流光渐变动画的占位骨架矩形。
 func skeletonShimmerBox(c *ui.Context, radius float32, t *ui.Theme) ui.Element {
-	c.AnimationFrame()
-	phase := shimmerPhase()
+	dark := t.Dark
 	return ui.Box(c).Draw(func(p *ui.Painter, r ui.Rect) {
-		drawShimmerRect(p, r, radius, phase, t.Dark)
+		p.AnimationFrame()
+		drawShimmerRect(p, r, radius, shimmerPhaseAt(p.Now()), dark)
 	})
 }
 
 // skeletonBirdCard 构建带灰色渐变流光底板与活泼弹性跳跃小鸟图标的加载占位卡片。
 func skeletonBirdCard(c *ui.Context, radius float32, iconSize float32, t *ui.Theme) ui.Element {
-	c.AnimationFrame()
-	phase := shimmerPhase()
-	hop := birdHopPhase()
-	bounce := float32(math.Abs(math.Sin(float64(hop) * math.Pi)))
-	liftY := -bounce * 9
-	shadowW := max(float32(16), iconSize*0.64) - bounce*7
-	shadowAlpha := float32(0.16) - bounce*0.08
-	if t.Dark {
-		shadowAlpha = float32(0.36) - bounce*0.14
-	}
-	shadowCol := ui.RGBA(15, 23, 42, shadowAlpha)
+	dark := t.Dark
 	iconCol := t.TextMuted.Alpha(0.55)
-	if t.Dark {
+	if dark {
 		iconCol = t.TextMuted.Alpha(0.65)
 	}
+	birdTheme := *t
+	birdTheme.Text = iconCol
 
-	return ui.Box(c).Fill().Center().Draw(func(p *ui.Painter, r ui.Rect) {
-		drawShimmerRect(p, r, radius, phase, t.Dark)
-	}).Children(func() {
-		ui.Column(c).Center().Gap(3).Children(func() {
-			ui.Box(c).Translate(0, liftY).Children(func() {
-				ui.Icon(c, iconBird).FontSize(iconSize).TextColor(iconCol)
-			})
-			ui.Box(c).Size(shadowW, 4).Radius(2).Background(shadowCol)
-		})
+	return ui.Themed(c, &birdTheme).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
+		p.AnimationFrame()
+		now := p.Now()
+		drawShimmerRect(p, r, radius, shimmerPhaseAt(now), dark)
+
+		hop := birdHopPhaseAt(now)
+		bounce := float32(math.Abs(math.Sin(float64(hop) * math.Pi)))
+		liftY := -bounce * 9
+		shadowW := max(float32(16), iconSize*0.64) - bounce*7
+		shadowAlpha := float32(0.16) - bounce*0.08
+		if dark {
+			shadowAlpha = float32(0.36) - bounce*0.14
+		}
+		shadowCol := ui.RGBA(15, 23, 42, shadowAlpha)
+
+		totalH := iconSize + 3 + 4
+		topY := r.Y + (r.H-totalH)/2
+		cx := r.X + r.W/2
+		iconRect := ui.Rect{X: cx - iconSize/2, Y: topY + liftY, W: iconSize, H: iconSize}
+		p.Image(iconBird, iconRect, ui.Contain)
+		shadowRect := ui.Rect{X: cx - shadowW/2, Y: topY + iconSize + 3, W: shadowW, H: 4}
+		p.Fill(shadowRect, shadowCol, 2)
 	})
 }
 

@@ -6,9 +6,28 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Darastas/Birdview/internal/model"
 )
+
+func cloneSpeciesMedia(src *model.SpeciesMedia) *model.SpeciesMedia {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	if len(src.Photos) > 0 {
+		cp.Photos = append([]model.MediaPhoto(nil), src.Photos...)
+	}
+	if len(src.Sounds) > 0 {
+		cp.Sounds = append([]model.MediaSound(nil), src.Sounds...)
+	}
+	if src.Wiki != nil {
+		w := *src.Wiki
+		cp.Wiki = &w
+	}
+	return &cp
+}
 
 // FetchSpeciesGuideMedia 为「鸟类图鉴」按需聚合指定鸟种的标准资料：
 // 1. iNaturalist Taxa（标准生态照与物种信息）
@@ -17,6 +36,12 @@ import (
 // 4. 中文维基百科 REST Summary（中文百科简介）
 // 注意：仅用于图鉴视图，绝不用于区域近期观测记录视图。
 func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, xcKey string) *model.SpeciesMedia {
+	return c.FetchSpeciesGuideMediaProgressive(ctx, sciName, comName, xcKey, nil)
+}
+
+// FetchSpeciesGuideMediaProgressive 并发拉取图鉴物种资料并在快源（iNaturalist 等）返回时增量回调，
+// 避免中文维基百科慢响应或超时拖慢首图与鸣声展示。
+func (c *Client) FetchSpeciesGuideMediaProgressive(ctx context.Context, sciName, comName, xcKey string, onPartial func(*model.SpeciesMedia)) *model.SpeciesMedia {
 	res := &model.SpeciesMedia{
 		SciName: sciName,
 		ComName: comName,
@@ -30,16 +55,31 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 		mu          sync.Mutex
 		wikiSummary *model.WikiSummary
 	)
+	emitPartial := func() {
+		if onPartial == nil {
+			return
+		}
+		mu.Lock()
+		snap := cloneSpeciesMedia(res)
+		if wikiSummary != nil {
+			w := *wikiSummary
+			snap.Wiki = &w
+		}
+		mu.Unlock()
+		onPartial(snap)
+	}
 
 	// 1. iNaturalist 物种信息与标准配图（优先精确匹配拉丁学名，避免误命中亚种或近缘种）
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		subCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		defer cancel()
 		trimmedSci := strings.TrimSpace(sciName)
 		u := fmt.Sprintf("%s/taxa?q=%s&rank=species&per_page=5&locale=zh-CN",
 			c.INatBaseURL, url.QueryEscape(trimmedSci))
 		var resp inatTaxaResp
-		if err := c.getJSON(ctx, u, nil, &resp); err != nil || len(resp.Results) == 0 {
+		if err := c.getJSON(subCtx, u, nil, &resp); err != nil || len(resp.Results) == 0 {
 			return
 		}
 		taxon := resp.Results[0]
@@ -50,7 +90,6 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 			}
 		}
 		mu.Lock()
-		defer mu.Unlock()
 		res.INatTaxonID = taxon.ID
 		res.INatURL = fmt.Sprintf("https://www.inaturalist.org/taxa/%d", taxon.ID)
 		res.INatObservationsCount = taxon.ObservationsCount
@@ -78,20 +117,23 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 				})
 			}
 		}
+		mu.Unlock()
+		emitPartial()
 	}()
 
 	// 2. iNaturalist 鸟鸣实录（免 Key）+ 补充图集
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		subCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		defer cancel()
 		u := fmt.Sprintf("%s/observations?taxon_name=%s&sounds=true&quality_grade=research&per_page=6&order_by=votes",
 			c.INatBaseURL, url.QueryEscape(sciName))
 		var resp inatObsResp
-		if err := c.getJSON(ctx, u, nil, &resp); err != nil {
+		if err := c.getJSON(subCtx, u, nil, &resp); err != nil {
 			return
 		}
 		mu.Lock()
-		defer mu.Unlock()
 		for _, obs := range resp.Results {
 			if len(res.Photos) < 5 {
 				for _, p := range obs.Photos {
@@ -134,6 +176,8 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 				})
 			}
 		}
+		mu.Unlock()
+		emitPartial()
 	}()
 
 	// 3. 可选：Xeno-canto API v3 专业鸟鸣库
@@ -141,15 +185,16 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			subCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			defer cancel()
 			query := fmt.Sprintf(`sp:"%s"`, sciName)
 			u := fmt.Sprintf("%s/recordings?query=%s&key=%s",
 				c.XenoBaseURL, url.QueryEscape(query), url.QueryEscape(strings.TrimSpace(xcKey)))
 			var resp xenoResp
-			if err := c.getJSON(ctx, u, nil, &resp); err != nil {
+			if err := c.getJSON(subCtx, u, nil, &resp); err != nil {
 				return
 			}
 			mu.Lock()
-			defer mu.Unlock()
 			var xcSounds []model.MediaSound
 			for _, rec := range resp.Recordings {
 				if rec.File == "" || len(xcSounds) >= 4 {
@@ -170,13 +215,17 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 				})
 			}
 			res.Sounds = append(xcSounds, res.Sounds...)
+			mu.Unlock()
+			emitPartial()
 		}()
 	}
 
-	// 4. 中文维基百科摘要（强制大陆简体中文）
+	// 4. 中文维基百科摘要（强制大陆简体中文，独立 3.5s 超时防卡死整体详情加载）
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		subCtx, cancel := context.WithTimeout(ctx, 3500*time.Millisecond)
+		defer cancel()
 		titles := []string{}
 		if comName != "" {
 			titles = append(titles, comName)
@@ -188,8 +237,9 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 		for _, title := range titles {
 			u := fmt.Sprintf("%s/page/summary/%s", c.WikiBaseURL, url.PathEscape(title))
 			var w wikiResp
-			if err := c.getJSON(ctx, u, wikiHeaders, &w); err == nil && w.Extract != "" {
+			if err := c.getJSON(subCtx, u, wikiHeaders, &w); err == nil && w.Extract != "" {
 				pageURL := strings.Replace(w.ContentURLs.Desktop.Page, "zh.wikipedia.org/wiki/", "zh.wikipedia.org/zh-cn/", 1)
+				mu.Lock()
 				wikiSummary = &model.WikiSummary{
 					Title:       w.Title,
 					Description: w.Description,
@@ -198,12 +248,14 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 					Thumbnail:   w.Thumbnail.Source,
 					Source:      "中文维基百科",
 				}
+				mu.Unlock()
 				return
 			}
 		}
 	}()
 
 	wg.Wait()
+	mu.Lock()
 	res.Wiki = wikiSummary
 	if len(res.Photos) == 0 && res.Wiki != nil && res.Wiki.Thumbnail != "" {
 		res.Photos = append(res.Photos, model.MediaPhoto{
@@ -214,6 +266,7 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 			Source:      "Wikipedia",
 		})
 	}
+	mu.Unlock()
 	return res
 }
 
@@ -294,7 +347,7 @@ func (c *Client) FetchSpeciesThumb(ctx context.Context, sciName string) (string,
 	}
 	for _, taxon := range resp.Results {
 		if strings.EqualFold(strings.TrimSpace(taxon.Name), trimmed) && taxon.DefaultPhoto.MediumURL != "" {
-			return taxon.DefaultPhoto.MediumURL, nil
+			return strings.Replace(taxon.DefaultPhoto.MediumURL, "/medium.", "/small.", 1), nil
 		}
 	}
 	return "", nil

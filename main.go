@@ -31,7 +31,7 @@ func main() {
 		}
 
 		client := api.NewClient()
-		netimage.SetClient(client.HTTP)
+		netimage.SetClient(client.ImageHTTPClient())
 
 		appui.ApplyThemeSource(st.Settings().ThemeMode)
 		mygo.SetOrientations(mygo.OrientationPortrait)

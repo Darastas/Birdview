@@ -422,6 +422,7 @@ func TestPhotoLightboxContainAndReset(t *testing.T) {
 	}
 
 	app.openNetworkPhotosViewer("普通翠鸟", photos, 1)
+	tt.Frame()
 	advanceUI(tt, 120*time.Millisecond)
 	if !app.zoomOpen || app.zoomPager.Page != 1 || len(app.zoomPhotos) != 2 {
 		t.Fatalf("expected lightbox open at page 1, open=%v page=%d len=%d", app.zoomOpen, app.zoomPager.Page, len(app.zoomPhotos))
@@ -443,6 +444,7 @@ func TestPhotoLightboxContainAndReset(t *testing.T) {
 
 	// 重新打开不同图片时页码与缩放状态必须复位，不可残留上次索引 1
 	app.openNetworkPhotosViewer("戴胜", photos[:1], 0)
+	tt.Frame()
 	advanceUI(tt, 120*time.Millisecond)
 	if !app.zoomOpen || app.zoomPager.Page != 0 || !tt.HasText("第 1 / 1 张") {
 		t.Fatalf("expected lightbox page reset to 0, open=%v page=%d texts=%q", app.zoomOpen, app.zoomPager.Page, tt.Texts())
@@ -629,4 +631,285 @@ func TestExploreImmediateSkeletonAndConditionalScrim(t *testing.T) {
 	app.journalLifelistScroll.Y = 40
 	advanceUI(tt, 32*time.Millisecond)
 	_ = tt.Image()
+}
+
+func touchSwipe(tt *ui.Tester, x0, y0, x1, y1 float32, steps int) {
+	tt.FingerDown(x0, y0)
+	for i := 1; i <= steps; i++ {
+		tt.Advance(16 * time.Millisecond)
+		f := float32(i) / float32(steps)
+		tt.FingerMove(x0+(x1-x0)*f, y0+(y1-y0)*f)
+	}
+	tt.Advance(16 * time.Millisecond)
+	tt.FingerUp(x1, y1)
+}
+
+func TestAndroidImmersiveSafeAreaAndNoBottomMask(t *testing.T) {
+	app := newTestAppState(t)
+	tt := ui.NewTester(app.View, 402, 844)
+	tt.SetInsets(44, 0, 24, 0)
+	advanceUI(tt, 64*time.Millisecond)
+
+	// 验证沉浸式状态栏顶部适配：头部筛选按钮应在 44dp 状态栏之下且不过度留白
+	mr, ok := tt.Find("目科筛选")
+	if !ok {
+		mr, ok = tt.Find("目科")
+	}
+	if !ok || mr.Y < 44 || mr.Y > 92 {
+		t.Fatalf("expected immersive header button below 44dp status bar without double gap, ok=%v rect=%+v", ok, mr)
+	}
+
+	// 验证悬浮底部导航底座贴合底部手势区上方（不再叠加安全区导致上浮 40dp+）
+	sr, ok := tt.Find("设置")
+	if !ok {
+		t.Fatalf("expected bottom dock item 设置")
+	}
+	// dockBottom = 24+4 = 28, height = 62 -> dock y=[754, 816]
+	if sr.Y+sr.H < 775 || sr.Y+sr.H > 824 {
+		t.Fatalf("expected dock near gesture bar y=[754..816], got item rect=%+v", sr)
+	}
+
+	// 进入鸟种详情页验证 Hero 区全出血顶到状态栏上方
+	if err := tt.Click("普通翠鸟"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 500*time.Millisecond)
+	if app.router.Path() != "/guide/comkin1" {
+		t.Fatalf("expected detail route, got %q", app.router.Path())
+	}
+	if img := tt.Image(); img.Bounds().Dx() != 402 || img.Bounds().Dy() != 844 {
+		t.Fatalf("unexpected detail bounds: %v", img.Bounds())
+	}
+}
+
+func TestTouchFlingCatchContinueAndBrakeNoClick(t *testing.T) {
+	app := newTestAppState(t)
+	taxa := make([]model.Taxon, 24)
+	china := make(map[string]bool, 24)
+	for i := range taxa {
+		code := string([]byte{'s', 'p', byte('a' + i/26), byte('a' + i%26)})
+		taxa[i] = model.Taxon{
+			SpeciesCode:   code,
+			ComName:       "测试鸟" + code,
+			SciName:       "Avis " + code,
+			Order:         "Passeriformes",
+			FamilySciName: "Paridae",
+		}
+		china[code] = true
+	}
+	app.SetTaxonomy(taxa, china, nil, "CN-11")
+
+	tt := ui.NewTester(app.View, 402, 844)
+	tt.SetInsets(44, 0, 24, 0)
+	advanceUI(tt, 64*time.Millisecond)
+
+	// 1. 第一次向上滑动触发惯性滚动（fling）
+	touchSwipe(tt, 200, 620, 200, 260, 8)
+	tt.Advance(32 * time.Millisecond)
+	yAfterSwipe1 := app.guideScroll.Y
+	tt.Advance(48 * time.Millisecond)
+	yMidFling := app.guideScroll.Y
+	if yMidFling <= yAfterSwipe1 || yAfterSwipe1 < 80 {
+		t.Fatalf("expected active fling scrolling downward, yAfterSwipe1=%.1f yMidFling=%.1f", yAfterSwipe1, yMidFling)
+	}
+
+	// 2. 惯性滚动途中手指再次按住并继续上滑，不能锁死或丢失拖拽
+	touchSwipe(tt, 200, 560, 200, 320, 6)
+	advanceUI(tt, 80*time.Millisecond)
+	if app.guideScroll.Y <= yMidFling+30 {
+		t.Fatalf("expected continued scroll after catching fling, before=%.1f after=%.1f", yMidFling, app.guideScroll.Y)
+	}
+
+	// 3. 再次触发 fling 后单指轻点急停，必须停下滚动且不能误点进入详情页
+	touchSwipe(tt, 200, 620, 200, 280, 6)
+	tt.Advance(32 * time.Millisecond)
+	tt.FingerDown(110, 460)
+	tt.Advance(20 * time.Millisecond)
+	tt.FingerUp(110, 460)
+	advanceUI(tt, 80*time.Millisecond)
+
+	if app.router.Path() != "/guide" {
+		t.Fatalf("expected tap-to-brake not to click card underneath, path=%q", app.router.Path())
+	}
+	yBraked := app.guideScroll.Y
+	advanceUI(tt, 64*time.Millisecond)
+	if app.guideScroll.Y != yBraked {
+		t.Fatalf("expected fling stopped after brake tap, got %.1f -> %.1f", yBraked, app.guideScroll.Y)
+	}
+}
+
+func TestTouchModalNoAutoFocusAndNoKeyboardOnClose(t *testing.T) {
+	app := newTestAppState(t)
+	tt := ui.NewTester(app.View, 402, 844)
+	tt.SetInsets(44, 0, 24, 0)
+	advanceUI(tt, 64*time.Millisecond)
+
+	before := tt.TextInputShowCount()
+
+	// 1. 打开目科弹窗，搜索框绝不能自动聚焦或拉起输入法
+	if err := tt.Click("目科"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 800*time.Millisecond)
+	if !app.guideFilterSheet {
+		t.Fatal("expected guideFilterSheet open")
+	}
+	if active, _ := tt.TextInputActive(); active || tt.TextInputShowCount() != before {
+		t.Fatalf("expected no auto-focus/IME on sheet open, active=%v showCount=%d before=%d", active, tt.TextInputShowCount(), before)
+	}
+
+	// 2. 关闭目科弹窗，也绝不能拉起输入法
+	if err := tt.Click("完成"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 800*time.Millisecond)
+	if active, _ := tt.TextInputActive(); app.guideFilterSheet || active || tt.TextInputShowCount() != before {
+		t.Fatalf("expected no IME popup after sheet close, open=%v active=%v showCount=%d before=%d", app.guideFilterSheet, active, tt.TextInputShowCount(), before)
+	}
+
+	// 3. 打开并关闭地区弹窗同样不能触发输入法
+	if err := tt.Click("切换图鉴地区范围"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 800*time.Millisecond)
+	if err := tt.Click("中国"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 800*time.Millisecond)
+	if tt.TextInputShowCount() != before {
+		t.Fatalf("expected scope sheet open/close not to show keyboard, got %d want %d", tt.TextInputShowCount(), before)
+	}
+
+	// 4. 明确用手指轻点搜索框才允许激活输入法；之后打开再关闭任意弹窗也不能把键盘重新弹起
+	sr, ok := tt.Find("搜索鸟种")
+	if !ok {
+		t.Fatal("expected 搜索鸟种 search input")
+	}
+	cx, cy := sr.X+sr.W/2, sr.Y+sr.H/2
+	tt.FingerDown(cx, cy)
+	tt.Advance(20 * time.Millisecond)
+	tt.FingerUp(cx, cy)
+	advanceUI(tt, 64*time.Millisecond)
+	afterTap := tt.TextInputShowCount()
+	if active, _ := tt.TextInputActive(); !active || afterTap <= before {
+		t.Fatalf("expected explicit touch tap to activate IME, active=%v afterTap=%d before=%d", active, afterTap, before)
+	}
+	if err := tt.Click("目科"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 800*time.Millisecond)
+	if err := tt.Click("完成"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 800*time.Millisecond)
+	if active, _ := tt.TextInputActive(); active || tt.TextInputShowCount() != 0 {
+		t.Fatalf("expected closing modal after prior search never re-shows keyboard, active=%v show=%d", active, tt.TextInputShowCount())
+	}
+}
+
+func TestUnloadedHeroAndLightboxPagerSingleStepSwipe(t *testing.T) {
+	app := newTestAppState(t)
+	app.guideMediaMap["comkin1"].Photos = []model.MediaPhoto{
+		{URL: "http://127.0.0.1:1/u1.jpg", ThumbURL: "http://127.0.0.1:1/t1.jpg", Source: "iNaturalist", Attribution: "A1"},
+		{URL: "http://127.0.0.1:1/u2.jpg", ThumbURL: "http://127.0.0.1:1/t2.jpg", Source: "iNaturalist", Attribution: "A2"},
+		{URL: "http://127.0.0.1:1/u3.jpg", ThumbURL: "http://127.0.0.1:1/t3.jpg", Source: "iNaturalist", Attribution: "A3"},
+		{URL: "http://127.0.0.1:1/u4.jpg", ThumbURL: "http://127.0.0.1:1/t4.jpg", Source: "iNaturalist", Attribution: "A4"},
+	}
+
+	tt := ui.NewTester(app.View, 402, 844)
+	tt.SetInsets(44, 0, 24, 0)
+	if err := tt.Click("普通翠鸟"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 600*time.Millisecond)
+
+	if app.guideGallery.Page != 0 || !tt.HasText("1 / 4") {
+		t.Fatalf("expected initial page 0 and 1 / 4, page=%d texts=%q", app.guideGallery.Page, tt.Texts())
+	}
+
+	// 图片均未加载出来时，每次横向滑动严格切换一页：0->1->2->3
+	for want := 1; want <= 3; want++ {
+		touchSwipe(tt, 350, 200, 50, 200, 8)
+		advanceUI(tt, 420*time.Millisecond)
+		wantLabel := string([]byte{byte('1' + want)}) + " / 4"
+		if app.guideGallery.Page != want || !tt.HasText(wantLabel) {
+			t.Fatalf("swipe %d: expected Page=%d and label %q, got Page=%d texts=%q", want, want, wantLabel, app.guideGallery.Page, tt.Texts())
+		}
+	}
+
+	// 验证极快长距离滑动也不跨越多页（3->2->1）
+	touchSwipe(tt, 20, 200, 385, 200, 3)
+	advanceUI(tt, 420*time.Millisecond)
+	if app.guideGallery.Page != 2 || !tt.HasText("3 / 4") {
+		t.Fatalf("expected single-page fast flick back to 2 (3 / 4), got Page=%d", app.guideGallery.Page)
+	}
+
+	// 手势取消应干净吸附回整页而非悬在半页
+	tt.FingerDown(280, 200)
+	tt.Advance(16 * time.Millisecond)
+	tt.FingerMove(180, 200)
+	tt.Advance(16 * time.Millisecond)
+	tt.FingerCancel()
+	advanceUI(tt, 420*time.Millisecond)
+	if app.guideGallery.Page != 2 || !tt.HasText("3 / 4") {
+		t.Fatalf("expected canceled swipe snapped cleanly back to page 2, got Page=%d", app.guideGallery.Page)
+	}
+
+	// 点击 Hero 进入灯箱并滑向第 4 张，页码与摄影署名信息应无延迟立即同步
+	if err := tt.Click("点击放大图片"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 120*time.Millisecond)
+	if !app.zoomOpen || app.zoomPager.Page != 2 || !tt.HasText("第 3 / 4 张") {
+		t.Fatalf("expected lightbox at page 2 (3/4), open=%v page=%d", app.zoomOpen, app.zoomPager.Page)
+	}
+
+	touchSwipe(tt, 350, 420, 50, 420, 7)
+	tt.Advance(32 * time.Millisecond)
+	if app.zoomPager.Page != 3 || !tt.HasText("第 4 / 4 张") || !tt.HasText("来源：iNaturalist · 署名：A4") {
+		t.Fatalf("expected lightbox info updated immediately after swipe, page=%d texts=%q", app.zoomPager.Page, tt.Texts())
+	}
+}
+
+func TestAndroidBackClosesLightboxOnlyNotDetailRoute(t *testing.T) {
+	app := newTestAppState(t)
+	app.guideMediaMap["comkin1"].Photos = []model.MediaPhoto{
+		{URL: "http://127.0.0.1:1/b1.jpg", Source: "iNaturalist", Attribution: "U1"},
+		{URL: "http://127.0.0.1:1/b2.jpg", Source: "iNaturalist", Attribution: "U2"},
+	}
+
+	tt := ui.NewTester(app.View, 402, 844)
+	tt.SetInsets(44, 0, 24, 0)
+	if err := tt.Click("普通翠鸟"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 600*time.Millisecond)
+	if err := tt.Click("点击放大图片"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 120*time.Millisecond)
+	if !app.zoomOpen || app.router.Path() != "/guide/comkin1" {
+		t.Fatalf("expected lightbox open on detail page, zoom=%v path=%q", app.zoomOpen, app.router.Path())
+	}
+
+	// 第一次手机侧边返回：仅关闭灯箱，绝不能退回图鉴主页
+	if handled := tt.MobileBack(); !handled {
+		t.Fatal("expected MobileBack handled by lightbox")
+	}
+	advanceUI(tt, 150*time.Millisecond)
+	if app.zoomOpen {
+		t.Fatal("expected lightbox closed after first MobileBack")
+	}
+	if app.router.Path() != "/guide/comkin1" {
+		t.Fatalf("expected to remain on /guide/comkin1 after closing lightbox, got %q", app.router.Path())
+	}
+
+	// 第二次返回才退回图鉴主页
+	if handled := tt.MobileBack(); !handled {
+		t.Fatal("expected MobileBack handled by router back")
+	}
+	advanceUI(tt, 600*time.Millisecond)
+	if app.router.Path() != "/guide" {
+		t.Fatalf("expected /guide after second MobileBack, got %q", app.router.Path())
+	}
 }
