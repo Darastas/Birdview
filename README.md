@@ -4,10 +4,10 @@
 
 ## 核心功能
 
-### 1. 鸟类图鉴
+### 1. 极简图鉴画册
 - 接入 **eBird API v2** 全球物种级分类名录（大陆简体中文 `zh_SIM`，支持全国、当前省份及已解锁范围切换）。
-- 内置完整鸟纲目、科简体中文化索引，消除杂乱的英文分类混排。
-- 图鉴列表支持按需解析并缓存物种代表缩略图；点击进入详情可浏览高清图集（支持左右滑动轮播与全屏双指缩放）、流式播放 **iNaturalist Sounds** / **Xeno-canto v3** 鸟鸣参考录音，并阅读 **中文维基百科** 物种介绍。
+- 内置完整鸟纲 45 个目、249 个科的简体中文化索引，消除英文分类混排。
+- 采用无边框双列摄影网格按需流式加载缩略图；全出血沉浸详情页支持轮播缩放、流式播放 **iNaturalist Sounds** / **Xeno-canto v3** 鸟鸣参考录音与阅读 **中文维基百科** 物种简介。
 
 ### 2. 区域探索与观鸟热点
 - 集成手机 GPS 一键定位与全国 34 个省级行政区选择。
@@ -49,6 +49,8 @@ go tool mygo build -platform android/arm64
 # 正式构建全架构安装包（输出 build/android/birdview-2.0.0.apk 与 .aab）
 go tool mygo build -platform android
 ```
+
+> 若 Windows 本机 `~/.gradle/gradle.properties` 配置了失效代理，可通过清理代理环境变量或覆盖 `-Dhttp.proxyHost=` / `GRADLE_USER_HOME` 后正常执行 Gradle 构建。
 
 ### 桌面预览构建
 

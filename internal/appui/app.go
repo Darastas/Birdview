@@ -201,14 +201,14 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client, sess *
 		regionCodes:      make(map[string]bool),
 		thumbMap:         thumbs,
 		thumbTried:       make(map[string]bool),
-		thumbSem:         make(chan struct{}, 3),
+		thumbSem:         make(chan struct{}, 4),
 		guideOrder:       "全部目",
 		guideFamily:      "全部科",
 		guideMediaMap:    make(map[string]*model.SpeciesMedia),
 		guideMediaBusy:   make(map[string]bool),
 		regionalRegion:   cfg.DefaultRegion,
 		regRegionLabel:   regionLabelByCode(cfg.DefaultRegion),
-		regBackLabel:     "近 14 天",
+		regBackLabel:     "14天",
 		regRegionTarget:  "explore",
 		regChecklistMap:  make(map[string]*model.ChecklistDetail),
 		regChecklistBusy: make(map[string]bool),
@@ -329,13 +329,6 @@ func (a *AppState) View(c *ui.Context) {
 		a.pendingToast = ""
 	}
 
-	navTabs := []mobile.BarButton{
-		{Label: "图鉴", Icon: paintIconGuide},
-		{Label: "探索", Icon: paintIconExplore},
-		{Label: "日志", Icon: paintIconJournal},
-		{Label: "设置", Icon: paintIconSettings},
-	}
-
 	rootView := a.isRootRoute()
 
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
@@ -343,13 +336,13 @@ func (a *AppState) View(c *ui.Context) {
 			a.router.View(c, func(r *ui.Route) {
 				switch {
 				case r.Match("/guide"):
-					r.Title("鸟类图鉴")
+					r.Title("图鉴")
 					a.viewGuideHome(c, t)
 				case r.Match("/guide/{code}"):
 					r.Title("鸟种详情")
 					a.viewGuideDetailPage(c, t, r.Param("code"))
 				case r.Match("/explore"):
-					r.Title("区域探索")
+					r.Title("探索")
 					a.viewExploreHome(c, t)
 				case r.Match("/explore/photo/{id}"):
 					r.Title("现场实拍")
@@ -361,7 +354,7 @@ func (a *AppState) View(c *ui.Context) {
 					r.Title("观鸟热点")
 					a.viewExploreHotspotDetail(c, t, r.Param("id"))
 				case r.Match("/journal"):
-					r.Title("观鸟日志")
+					r.Title("日志")
 					a.viewJournalHome(c, t)
 				case r.Match("/journal/{id}"):
 					r.Title("日志详情")
@@ -370,7 +363,7 @@ func (a *AppState) View(c *ui.Context) {
 					r.Title("设置")
 					a.viewSettingsHome(c, t)
 				default:
-					r.Title("鸟类图鉴")
+					r.Title("图鉴")
 					a.viewGuideHome(c, t)
 				}
 			})
@@ -378,11 +371,8 @@ func (a *AppState) View(c *ui.Context) {
 
 		a.buildMiniAudioBar(c, t)
 
-		if rootView {
-			bar := mobile.BottomBar(c, &a.session.Tab, navTabs...).BorderWidth(1, 0, 0, 0).BorderColor(subtleHairlineColor(t))
-			if bar.Changed() {
-				a.SelectTab(a.session.Tab)
-			}
+		if rootView && minimalBottomBar(c, &a.session.Tab, t) {
+			a.SelectTab(a.session.Tab)
 		}
 	})
 
@@ -405,13 +395,12 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme) {
 		c.After(120 * time.Millisecond)
 	}
 
-	bar := ui.Column(c).FillWidth().Padding(0, 12, 8, 12).Shrink(0)
-	bar.Children(func() {
-		card := elevatedCard(c, t).Clip()
+	ui.Column(c).FillWidth().Padding(4, 20, 8, 20).Shrink(0).Children(func() {
+		card := flatSurface(c, t).Radius(14).Border(1, t.Border).Clip()
 		card.Children(func() {
 			ui.Row(c).FillWidth().Padding(10, 12).Gap(10).AlignItems(ui.Center).Children(func() {
 				if st.Loading {
-					ui.Box(c).Size(36, 36).Center().Children(func() {
+					ui.Box(c).Size(34, 34).Center().Children(func() {
 						ui.Spinner(c).Label("加载音频中")
 					})
 				} else {
@@ -421,7 +410,7 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme) {
 						ic = iconPause
 						lbl = "暂停"
 					}
-					if circleIconBtn(c, "mini-toggle", lbl, ic, t.Accent, t.AccentText, 36).Clicked() {
+					if circleIconBtn(c, "mini-toggle", lbl, ic, t.Accent, t.AccentText, 34).Clicked() {
 						a.player.TogglePause()
 					}
 				}
@@ -437,7 +426,7 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, sub).FontSize(11.5).TextColor(t.TextMuted).SingleLine()
 				})
 
-				if circleIconBtn(c, "mini-stop", "关闭播放器", iconClose, softPillColor(t), t.TextMuted, 30).Clicked() {
+				if circleIconBtn(c, "mini-stop", "关闭播放器", iconClose, t.Background, t.TextMuted, 28).Clicked() {
 					a.player.Stop()
 				}
 			})
@@ -449,8 +438,8 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme) {
 				} else if frac > 1 {
 					frac = 1
 				}
-				ui.Box(c).FillWidth().Height(2.5).Background(softPillColor(t)).Draw(func(p *ui.Painter, r ui.Rect) {
-					p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * frac, H: r.H}, t.Accent, 1.2)
+				ui.Box(c).FillWidth().Height(2).Background(t.Border).Draw(func(p *ui.Painter, r ui.Rect) {
+					p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * frac, H: r.H}, t.Accent, 1)
 				})
 			}
 		})
@@ -577,7 +566,7 @@ func (a *AppState) viewPhotoZoomOverlay(c *ui.Context, t *ui.Theme) {
 
 	ui.Overlay(c, func() {
 		bg := ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Background(ui.RGBA(8, 12, 20, 0.96)).Modal()
+			Background(ui.Hex("#000000")).Modal()
 		if bg.OverlayShortcut(0, ui.KeyEscape) {
 			a.zoomOpen = false
 		}
