@@ -20,10 +20,11 @@ const maxMemImages = 48
 // AppState 管理整个应用的状态、后台异步数据加载与原生 UI 视图构建。
 type AppState struct {
 	win    *mygo.Window
-	store  *store.Store
-	cache  *store.Cache
-	client *api.Client
-	player *audioctl.PlayerController
+	store    *store.Store
+	cache    *store.Cache
+	client   *api.Client
+	player   *audioctl.PlayerController
+	recorder audioctl.Recorder
 
 	// 导航与全局布局状态
 	page         string
@@ -65,8 +66,29 @@ type AppState struct {
 	guideMediaBusy  map[string]bool
 	guidePhotoIndex int
 
-	// 观鸟日志 / 已解锁（将在第3轮扩展，本轮提供清晰页面）
+	// 观鸟日志与已解锁鸟种状态
+	journalSpeciesOpts []string
+	journalQuery       string
+	filteredEntries    []model.JournalEntry
+	journalList        ui.ListState
+	journalSelected    int
+	journalActiveID    string
+	journalPhotoIndex  int
 	journalPrefillCode string
+	journalModalOpen   bool
+	jEditID            string
+	jDraftSpecies      string
+	jDraftObservedAt   string
+	jDraftLocation     string
+	jDraftCount        string
+	jDraftNotes        string
+	jDraftPhotos       []string
+	jDraftAudio        string
+	jDraftError        string
+	jDeleteConfirm     bool
+	jDeleteTargetID    string
+	lifelistFilter     string
+	lifelistSelected   string
 
 	// 区域动态 / 热点（将在第4轮扩展）
 	regionalRegion string
@@ -93,6 +115,7 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client) *AppSt
 		cache:          cache,
 		client:         client,
 		player:         audioctl.NewPlayerController(),
+		recorder:       audioctl.NewRecorder(),
 		page:           "guide",
 		guideSplit:     380,
 		journalSplit:   380,
@@ -107,11 +130,13 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client) *AppSt
 		guideOrder:     "全部目",
 		guideFamily:    "全部科",
 		guideSelected:  -1,
+		journalSelected: -1,
 		guideMediaMap:  make(map[string]*model.SpeciesMedia),
 		guideMediaBusy: make(map[string]bool),
 		regionalRegion: cfg.DefaultRegion,
 	}
 	a.syncSettingsDraft()
+	a.refreshJournalList()
 	a.refreshStorageStats()
 	return a
 }
@@ -178,6 +203,11 @@ func (a *AppState) refreshStorageStats() {
 	}
 }
 
+// SetRecorder 注入自定义录音器（主要用于单元测试模拟录音流程）。
+func (a *AppState) SetRecorder(rec audioctl.Recorder) {
+	a.recorder = rec
+}
+
 // View 是主窗口根视图函数（每帧在主线程执行，严禁做阻塞 I/O 或缓存 ui.Element）。
 func (a *AppState) View(c *ui.Context) {
 	t := applyAppTheme(c)
@@ -212,6 +242,9 @@ func (a *AppState) View(c *ui.Context) {
 			a.buildAudioBar(c, t)
 		})
 	})
+
+	a.viewJournalModal(c, t)
+	a.viewJournalDeleteDialog(c)
 }
 
 func (a *AppState) buildSidebar(c *ui.Context, t *ui.Theme) {
@@ -379,15 +412,6 @@ func (a *AppState) putMemImageLocked(key string, src ui.ImageSource) {
 		a.imgOrder = a.imgOrder[1:]
 		delete(a.imgCache, oldest)
 	}
-}
-
-// 占位视图：观鸟日志、已解锁鸟种（将在第3轮完整实现）
-func (a *AppState) viewJournal(c *ui.Context, t *ui.Theme) {
-	a.viewPlaceholder(c, t, "观鸟日志", "即将支持本地拍照上传、文字记录与一键现场麦克风录音")
-}
-
-func (a *AppState) viewLifelist(c *ui.Context, t *ui.Theme) {
-	a.viewPlaceholder(c, t, "已解锁鸟种", "完成观鸟日志记录后，将自动点亮并统计已解锁鸟种")
 }
 
 // 占位视图：区域观鸟动态、观鸟热点探索（将在第4轮完整实现）

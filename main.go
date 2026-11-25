@@ -32,6 +32,9 @@ func main() {
 		menu := mygo.NewMenu([]*mygo.MenuItem{
 			{Role: mygo.RoleAppMenu},
 			{Label: "文件", Submenu: []*mygo.MenuItem{
+				{Label: "新建观鸟日志…", Accelerator: "CmdOrCtrl+N", Click: func(_ *mygo.MenuItem, _ *mygo.Window) {
+					appState.OpenNewJournalModal("", "")
+				}},
 				{Label: "刷新当前数据", Accelerator: "CmdOrCtrl+R", Click: func(_ *mygo.MenuItem, _ *mygo.Window) {
 					appState.RefreshCurrent()
 				}},

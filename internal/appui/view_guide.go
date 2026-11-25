@@ -124,6 +124,7 @@ func (a *AppState) SetTaxonomy(taxa []model.Taxon, chinaSet, regionSet map[strin
 	a.guideFamilies = families
 
 	a.applyGuideFilter()
+	a.rebuildJournalSpeciesOptions()
 	if len(a.filteredTaxa) > 0 && a.guideActiveCode == "" {
 		a.selectGuideSpecies(0)
 	}
@@ -566,8 +567,7 @@ func (a *AppState) viewGuideDetailPane(c *ui.Context, t *ui.Theme) {
 }
 
 func (a *AppState) openNewJournalForSpecies(speciesCode string) {
-	a.journalPrefillCode = speciesCode
-	a.page = "journal"
+	a.OpenNewJournalModal(speciesCode, "")
 }
 
 func infoChip(c *ui.Context, t *ui.Theme, label, val string) {
