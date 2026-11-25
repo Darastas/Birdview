@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Darastas/Birdview/internal/api"
 	"github.com/Darastas/Birdview/internal/model"
-	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
 	"github.com/egoist/mygo/ui/netimage"
@@ -184,10 +184,67 @@ func (a *AppState) OpenSpeciesInGuide(speciesCode string) {
 		return
 	}
 	a.guideActiveCode = tx.SpeciesCode
-	a.guideGallery.Page = 0
+	a.guideGallery = mobile.PageState{}
 	a.ensureGuideMediaLoaded(tx)
 	a.router.Push("/guide/" + tx.SpeciesCode)
 	a.invalidateUI()
+}
+
+func (a *AppState) selectGuideProvinceScope(regionCode string) {
+	a.session.GuideScope = 1
+	if regionCode == "" {
+		regionCode = fallbackText(a.regionCodesFor, a.store.Settings().DefaultRegion)
+	}
+	if regionCode == "" {
+		regionCode = "CN-11"
+	}
+	if regionCode == a.regionCodesFor && len(a.regionCodes) > 0 {
+		a.applyGuideFilter()
+		return
+	}
+	if a.cache != nil {
+		if codes, ok := a.cache.LoadSpeciesList(regionCode, 24*time.Hour); ok && len(codes) > 0 {
+			set := make(map[string]bool, len(codes))
+			for _, c := range codes {
+				set[c] = true
+			}
+			a.regionCodes = set
+			a.regionCodesFor = regionCode
+			a.applyGuideFilter()
+			return
+		}
+	}
+	a.regionCodes = nil
+	a.regionCodesFor = regionCode
+	a.applyGuideFilter()
+
+	key := a.store.LoadEbirdKey()
+	if key == "" || a.win == nil {
+		return
+	}
+	a.taxaLoading = true
+	a.invalidateUI()
+	go func(rc, k string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		codes, err := a.client.FetchSpeciesList(ctx, k, rc)
+		cancel()
+		a.updateUI(func() {
+			a.taxaLoading = false
+			if err == nil && len(codes) > 0 {
+				if a.cache != nil {
+					_ = a.cache.SaveSpeciesList(rc, codes)
+				}
+				set := make(map[string]bool, len(codes))
+				for _, code := range codes {
+					set[code] = true
+				}
+				if a.regionCodesFor == rc {
+					a.regionCodes = set
+				}
+			}
+			a.applyGuideFilter()
+		})
+	}(regionCode, key)
 }
 
 func (a *AppState) applyGuideFilter() {
@@ -204,10 +261,9 @@ func (a *AppState) applyGuideFilter() {
 			if len(a.regionCodes) > 0 && !a.regionCodes[tx.SpeciesCode] {
 				continue
 			}
-		case 3:
-			if !a.store.IsUnlocked(tx.SpeciesCode) {
-				continue
-			}
+		}
+		if a.session.GuideOnlyUnlocked && !a.store.IsUnlocked(tx.SpeciesCode) {
+			continue
 		}
 
 		ordZh := model.OrderZh(tx.Order)
@@ -319,26 +375,39 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 				a.applyGuideFilter()
 			}
 
-			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(10).Children(func() {
-				ui.ScrollHorizontal(c.Key("guide-scopes")).Grow(1).Basis(0).Gap(8).Padding(2, 0).Children(func() {
-					if filterPill(c, "scope-cn", "中国", a.session.GuideScope == 0, t).Clicked() {
-						a.session.GuideScope = 0
-						a.applyGuideFilter()
+			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(8).Children(func() {
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					scopeLabel := "中国"
+					scopeIcon := iconMapPin
+					switch a.session.GuideScope {
+					case 1:
+						scopeCode := fallbackText(a.regionCodesFor, a.store.Settings().DefaultRegion)
+						scopeLabel = regionShortNameByCode(scopeCode)
+					case 2:
+						scopeLabel = "全球"
+						scopeIcon = iconGlobe
 					}
-					provLabel := "省区"
-					if a.regionCodesFor != "" {
-						provLabel = regionShortNameByCode(a.regionCodesFor)
+					scopeBtn := applySculptedSecondaryPillStyle(
+						ui.Row(c.Key("guide-scope-btn")).Height(34).PaddingX(12).Radius(17).
+							Gap(5).AlignItems(ui.Center).Shrink(0).
+							Role(ui.RoleButton).Label("切换图鉴地区范围"),
+						t,
+					)
+					scopeBtn.Children(func() {
+						ui.Icon(c, scopeIcon).FontSize(13).TextColor(opticalAccentColor(t))
+						ui.Text(c, scopeLabel).FontSize(13).FontWeight(500).TextColor(t.Text).SingleLine()
+					})
+					if scopeBtn.Clicked() {
+						a.regRegionQuery = ""
+						a.guideScopeSheet = true
 					}
-					if filterPill(c, "scope-prov", provLabel, a.session.GuideScope == 1, t).Clicked() {
-						a.session.GuideScope = 1
-						a.applyGuideFilter()
+
+					ulIdx := 0
+					if a.session.GuideOnlyUnlocked {
+						ulIdx = 1
 					}
-					if filterPill(c, "scope-ul", "已解锁", a.session.GuideScope == 3, t).Clicked() {
-						a.session.GuideScope = 3
-						a.applyGuideFilter()
-					}
-					if filterPill(c, "scope-all", "全球", a.session.GuideScope == 2, t).Clicked() {
-						a.session.GuideScope = 2
+					if tactileCompactSegment(c, "guide-ul-seg", &ulIdx, t, "全部", "已解锁") {
+						a.session.GuideOnlyUnlocked = ulIdx == 1
 						a.applyGuideFilter()
 					}
 				})
@@ -371,114 +440,208 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 		}
 		a.guideList.Label = nil
 
-		list := ui.List(c.Key("guide-taxa-list"), &a.guideList, rowCount).
-			Grow(1).Basis(0).FillWidth()
-		if list.PullToRefresh(&a.guideRefresh) {
-			a.loadTaxonomyAsync(true)
-		}
-		list.Rows(func(row ui.ListRow) {
-			rc := row.Context
-			baseIdx := row.Index * 2
-			padBottom := float32(12)
-			if row.Index == rowCount-1 {
-				padBottom = 104
+		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
+			list := ui.List(c.Key("guide-taxa-list"), &a.guideList, rowCount).Fill()
+			if list.PullToRefresh(&a.guideRefresh) {
+				a.loadTaxonomyAsync(true)
 			}
-			ui.Row(rc).FillWidth().Padding(4, 18, padBottom, 18).Gap(12).AlignItems(ui.Start).Children(func() {
-				for col := 0; col < 2; col++ {
-					idx := baseIdx + col
-					if idx >= len(a.filteredTaxa) {
-						ui.Box(rc).Grow(1).Basis(0)
-						continue
-					}
-					tx := a.filteredTaxa[idx]
-					unlocked := a.store.IsUnlocked(tx.SpeciesCode)
-					thumbURL := a.speciesThumbURL(tx.SpeciesCode)
-
-					tile := applyCardRimAndShadow(
-						ui.Box(rc.Key("gtile-"+tx.SpeciesCode)).Grow(1).Basis(0).Height(206),
-						18, t,
-					).Clip().Role(ui.RoleButton).Label(tx.ComName)
-
-					tile.Children(func() {
-						if thumbURL != "" {
-							netimage.Image(rc.Key("gt-"+tx.SpeciesCode), thumbURL, netimage.Options{
-								MaxSide:     420,
-								Fit:         ui.Cover,
-								Placeholder: t.Surface,
-							}).Fill()
-
-							// 丝绒三段式底部渐隐遮罩：让白字铭牌浮现在清晰照片之上
-							ui.Box(rc).Absolute().Left(0).Bottom(0).Right(0).Height(96).PassThrough().
-								LinearGradient(ui.LinearGradient{
-									Angle: 180,
-									Stops: []ui.GradientStop{
-										{Color: ui.Transparent, At: 0},
-										{Color: ui.RGBA(8, 11, 17, 0.36), At: 0.45},
-										{Color: ui.RGBA(8, 11, 17, 0.86), At: 1.0},
-									},
-								})
-						} else {
-							a.queueSpeciesThumb(tx)
-							ph := ui.Box(rc).Fill().Center()
-							if t.Dark {
-								ph.LinearGradient(ui.LinearGradient{From: ui.Hex("#1E2432"), To: ui.Hex("#131722"), Angle: 180})
-							} else {
-								ph.LinearGradient(ui.LinearGradient{From: ui.Hex("#E7EDF5"), To: ui.Hex("#DCE4F0"), Angle: 180})
-							}
-							ph.Children(func() {
-								ui.Icon(rc, iconBird).FontSize(34).TextColor(t.TextMuted.Alpha(0.32))
-							})
-						}
-
-						if unlocked {
-							ui.Box(rc).Absolute().Top(10).Right(10).Size(22, 22).Radius(11).
-								Background(t.Success).
-								Border(1.5, ui.RGBA(255, 255, 255, 0.9)).
-								InsetShadow(0, 1, 0, 0, ui.RGBA(255, 255, 255, 0.35)).
-								Shadow(0, 2, 6, 0, ui.RGBA(0, 0, 0, 0.25)).
-								Center().Children(func() {
-								ui.Icon(rc, iconCheck).FontSize(11).TextColor(ui.RGB(255, 255, 255))
-							})
-						}
-
-						titleCol := t.Text
-						subCol := t.TextMuted
-						if thumbURL != "" {
-							titleCol = ui.RGB(255, 255, 255)
-							subCol = ui.RGBA(255, 255, 255, 0.80)
-						}
-						ui.Column(rc).Absolute().Left(0).Right(0).Bottom(0).Padding(0, 12, 12, 12).Gap(2).PassThrough().Children(func() {
-							ui.Text(rc, tx.ComName).FontSize(15).FontWeight(600).TextColor(titleCol).SingleLine()
-							ui.Text(rc, model.FormatTaxonLine(tx)).FontSize(12).FontWeight(400).TextColor(subCol).SingleLine()
-						})
-					})
-					if tile.Clicked() {
-						a.OpenSpeciesInGuide(tx.SpeciesCode)
-					}
+			list.Rows(func(row ui.ListRow) {
+				rc := row.Context
+				baseIdx := row.Index * 2
+				padTop := float32(4)
+				if row.Index == 0 {
+					padTop = 10
 				}
-			})
-		}).Children(func() {
-			if len(a.filteredTaxa) == 0 && !a.taxaLoading {
-				ui.Box(c).Fill().Padding(24, 20, 104, 20).Center().Children(func() {
-					tactileCard(c, t).Padding(28).Center().Gap(10).Children(func() {
-						ui.Box(c).Size(52, 52).Radius(26).Center().Children(func() {
+				padBottom := float32(12)
+				if row.Index == rowCount-1 {
+					padBottom = 104
+				}
+				ui.Row(rc).FillWidth().Padding(padTop, 18, padBottom, 18).Gap(12).AlignItems(ui.Start).Children(func() {
+					for col := 0; col < 2; col++ {
+						idx := baseIdx + col
+						if idx >= len(a.filteredTaxa) {
+							ui.Box(rc).Grow(1).Basis(0)
+							continue
+						}
+						tx := a.filteredTaxa[idx]
+						unlocked := a.store.IsUnlocked(tx.SpeciesCode)
+						thumbURL := a.speciesThumbURL(tx.SpeciesCode)
+						var thumbSrc ui.ImageSource
+						if thumbURL != "" {
+							thumbSrc, _ = netimage.Load(rc, thumbURL, netimage.Options{MaxSide: 420})
+						}
+						hasThumb := thumbSrc != nil
+
+						tile := applyCardRimAndShadow(
+							ui.Box(rc.Key("gtile-"+tx.SpeciesCode)).Grow(1).Basis(0).Height(206),
+							18, t,
+						).Clip().Role(ui.RoleButton).Label(tx.ComName)
+
+						tile.Children(func() {
+							if hasThumb {
+								ui.Image(rc.Key("gt-"+tx.SpeciesCode), thumbSrc).Fill().Fit(ui.Cover).Role(ui.RoleImage)
+
+								// 丝绒三段式底部渐隐遮罩：让白字铭牌浮现在清晰照片之上
+								ui.Box(rc).Absolute().Left(0).Bottom(0).Right(0).Height(96).PassThrough().
+									LinearGradient(ui.LinearGradient{
+										Angle: 180,
+										Stops: []ui.GradientStop{
+											{Color: ui.Transparent, At: 0},
+											{Color: ui.RGBA(8, 11, 17, 0.36), At: 0.45},
+											{Color: ui.RGBA(8, 11, 17, 0.86), At: 1.0},
+										},
+									})
+							} else {
+								a.queueSpeciesThumb(tx)
+								skeletonBirdCard(rc, 0, 34, t)
+							}
+
+							if unlocked {
+								ui.Box(rc).Absolute().Top(10).Right(10).Size(22, 22).Radius(11).
+									Background(t.Success).
+									Border(1.5, ui.RGBA(255, 255, 255, 0.9)).
+									InsetShadow(0, 1, 0, 0, ui.RGBA(255, 255, 255, 0.35)).
+									Shadow(0, 2, 6, 0, ui.RGBA(0, 0, 0, 0.25)).
+									Center().Children(func() {
+									ui.Icon(rc, iconCheck).FontSize(11).TextColor(ui.RGB(255, 255, 255))
+								})
+							}
+
+							titleCol := t.Text
+							subCol := t.TextMuted
+							if hasThumb {
+								titleCol = ui.RGB(255, 255, 255)
+								subCol = ui.RGBA(255, 255, 255, 0.80)
+							}
+							ui.Column(rc).Absolute().Left(0).Right(0).Bottom(0).Padding(0, 12, 12, 12).Gap(2).PassThrough().Children(func() {
+								ui.Text(rc, tx.ComName).FontSize(15).FontWeight(600).TextColor(titleCol).SingleLine()
+								ui.Text(rc, model.FormatTaxonLine(tx)).FontSize(12).FontWeight(400).TextColor(subCol).SingleLine()
+							})
+						})
+						if tile.Clicked() {
+							a.OpenSpeciesInGuide(tx.SpeciesCode)
+						}
+					}
+				})
+			}).Children(func() {
+				if len(a.filteredTaxa) == 0 && !a.taxaLoading {
+					ui.Box(c).Fill().Padding(24, 20, 104, 20).Center().Children(func() {
+						tactileCard(c, t).Padding(28).Center().Gap(10).Children(func() {
 							tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
 								ui.Icon(c, iconBird).FontSize(24).TextColor(t.TextMuted)
 							})
-						})
-						ui.Text(c, "暂无匹配的鸟种").FontSize(16).FontWeight(600)
-						ui.Text(c, "可切换浏览范围或清除关键词筛选").FontSize(13).TextColor(t.TextMuted)
-						if hasFilter || a.session.GuideQuery != "" {
-							if filterPill(c, "guide-reset-empty", "清除筛选条件", false, t).Clicked() {
-								a.session.GuideQuery = ""
-								a.guideOrder = "全部目"
-								a.guideFamily = "全部科"
-								a.applyGuideFilter()
+							ui.Text(c, "暂无匹配的鸟种").FontSize(16).FontWeight(600)
+							ui.Text(c, "可切换浏览范围或清除筛选条件").FontSize(13).TextColor(t.TextMuted)
+							if hasFilter || a.session.GuideQuery != "" || a.session.GuideOnlyUnlocked {
+								if filterPill(c, "guide-reset-empty", "清除筛选条件", false, t).Clicked() {
+									a.session.GuideQuery = ""
+									a.session.GuideOnlyUnlocked = false
+									a.guideOrder = "全部目"
+									a.guideFamily = "全部科"
+									a.applyGuideFilter()
+								}
 							}
+						})
+					})
+				}
+			})
+			scrollTopFadeScrim(c, t)
+		})
+	})
+}
+
+func (a *AppState) viewGuideScopeSheet(c *ui.Context, t *ui.Theme) {
+	sheetBg := t.Background
+	mobile.Sheet(c, &a.guideScopeSheet, mobile.SheetOptions{
+		Detents:    []float32{0.72, 0.92},
+		Background: &sheetBg,
+		Label:      "图鉴显示范围",
+	}, func() {
+		ui.Column(c).Fill().Children(func() {
+			ui.Row(c).FillWidth().Padding(8, 20, 14, 20).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "图鉴显示范围").FontSize(16).FontWeight(600)
+				if filterPill(c, "gs-close", "关闭", false, t).Clicked() {
+					a.guideScopeSheet = false
+				}
+			})
+			minimalDivider(c, t)
+
+			ui.Column(c).Padding(14, 18, 10, 18).Gap(10).Children(func() {
+				minimalSearchBar(c, "gs-search", &a.regRegionQuery, "搜索省市名称或区号", "搜索地区", t)
+			})
+
+			ui.Scroll(c.Key("gs-list")).Grow(1).Basis(0).FillWidth().Padding(4, 18, 28, 18).Gap(14).Children(func() {
+				q := strings.ToLower(strings.TrimSpace(a.regRegionQuery))
+				if q == "" {
+					tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
+						globalRow := ui.Row(c.Key("gs-global")).FillWidth().Padding(13, 16).
+							Justify(ui.SpaceBetween).AlignItems(ui.Center).
+							Role(ui.RoleButton).Label("全球")
+						globalRow.Children(func() {
+							w := 400
+							if a.session.GuideScope == 2 {
+								w = 500
+							}
+							ui.Text(c, "全球全部鸟种").FontSize(15).FontWeight(w)
+							if a.session.GuideScope == 2 {
+								ui.Icon(c, iconCheck).FontSize(16).TextColor(opticalAccentColor(t))
+							}
+						})
+						if globalRow.Clicked() {
+							a.session.GuideScope = 2
+							a.applyGuideFilter()
+							a.guideScopeSheet = false
+						}
+
+						cnRow := ui.Row(c.Key("gs-cn")).FillWidth().Padding(13, 16).
+							Justify(ui.SpaceBetween).AlignItems(ui.Center).
+							Role(ui.RoleButton).Label("中国")
+						cnRow.Children(func() {
+							w := 400
+							if a.session.GuideScope == 0 {
+								w = 500
+							}
+							ui.Text(c, "中国全境鸟种").FontSize(15).FontWeight(w)
+							if a.session.GuideScope == 0 {
+								ui.Icon(c, iconCheck).FontSize(16).TextColor(opticalAccentColor(t))
+							}
+						})
+						if cnRow.Clicked() {
+							a.session.GuideScope = 0
+							a.applyGuideFilter()
+							a.guideScopeSheet = false
 						}
 					})
+				}
+
+				tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
+					activeRegion := fallbackText(a.regionCodesFor, a.store.Settings().DefaultRegion)
+					for _, reg := range api.ChinaRegions {
+						r := reg
+						if q != "" && !strings.Contains(strings.ToLower(r.Name), q) && !strings.Contains(strings.ToLower(r.Code), q) {
+							continue
+						}
+						active := a.session.GuideScope == 1 && strings.EqualFold(activeRegion, r.Code)
+						row := ui.Row(c.Key("gs-reg-"+r.Code)).FillWidth().Padding(13, 16).
+							Justify(ui.SpaceBetween).AlignItems(ui.Center).
+							Role(ui.RoleButton).Label(r.Name)
+						row.Children(func() {
+							w := 400
+							if active {
+								w = 500
+							}
+							ui.Text(c, r.Name).FontSize(15).FontWeight(w)
+							if active {
+								ui.Icon(c, iconCheck).FontSize(16).TextColor(opticalAccentColor(t))
+							}
+						})
+						if row.Clicked() {
+							a.selectGuideProvinceScope(r.Code)
+							a.guideScopeSheet = false
+						}
+					}
 				})
-			}
+			})
 		})
 	})
 }
@@ -496,6 +659,7 @@ func (a *AppState) viewGuideFilterSheet(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, "重置").FontSize(14).TextColor(t.TextMuted)
 				})
 				if rst.Clicked() {
+					a.guideFilterQuery = ""
 					a.guideOrder = "全部目"
 					a.guideFamily = "全部科"
 					a.applyGuideFilter()
@@ -507,34 +671,67 @@ func (a *AppState) viewGuideFilterSheet(c *ui.Context, t *ui.Theme) {
 			})
 			minimalDivider(c, t)
 
-			ui.Scroll(c.Key("gf-scroll")).Grow(1).Basis(0).FillWidth().Padding(14, 18, 28, 18).Gap(14).Children(func() {
-				tactileCard(c, t).Padding(16).Gap(10).Children(func() {
-					ui.Text(c, "按目筛选").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
-					ui.Row(c).FillWidth().Gap(8).Wrap().Children(func() {
-						for i, ord := range a.guideOrders {
-							o := ord
-							if filterPill(c, fmt.Sprintf("gfo-%d", i), o, a.guideOrder == o, t).Clicked() {
-								a.guideOrder = o
-								a.guideFamily = "全部科"
-								a.applyGuideFilter()
-							}
-						}
-					})
-				})
+			ui.Box(c).Padding(12, 18, 4, 18).Children(func() {
+				minimalSearchBar(c, "gf-search", &a.guideFilterQuery, "搜索目名或科名（如：雀形目、鸭科）", "搜索目科", t)
+			})
 
-				tactileCard(c, t).Padding(16).Gap(10).Children(func() {
-					ui.Text(c, "按科筛选").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
-					families := a.filteredFamiliesForOrder()
-					ui.Row(c).FillWidth().Gap(8).Wrap().Children(func() {
-						for i, fam := range families {
-							f := fam
-							if filterPill(c, fmt.Sprintf("gff-%d", i), f, a.guideFamily == f, t).Clicked() {
-								a.guideFamily = f
-								a.applyGuideFilter()
-							}
-						}
+			fq := strings.ToLower(strings.TrimSpace(a.guideFilterQuery))
+			var matchedOrders []string
+			for _, ord := range a.guideOrders {
+				if fq == "" {
+					matchedOrders = append(matchedOrders, ord)
+				} else if ord != "全部目" && strings.Contains(strings.ToLower(ord), fq) {
+					matchedOrders = append(matchedOrders, ord)
+				}
+			}
+			families := a.filteredFamiliesForOrder()
+			var matchedFamilies []string
+			for _, fam := range families {
+				if fq == "" {
+					matchedFamilies = append(matchedFamilies, fam)
+				} else if fam != "全部科" && strings.Contains(strings.ToLower(fam), fq) {
+					matchedFamilies = append(matchedFamilies, fam)
+				}
+			}
+
+			ui.Scroll(c.Key("gf-scroll")).Grow(1).Basis(0).FillWidth().Padding(10, 18, 28, 18).Gap(14).Children(func() {
+				if len(matchedOrders) == 0 && len(matchedFamilies) == 0 {
+					tactileCard(c, t).Padding(24).Center().Children(func() {
+						ui.Text(c, "未找到匹配的目或科").FontSize(14).TextColor(t.TextMuted)
 					})
-				})
+					return
+				}
+
+				if len(matchedOrders) > 0 {
+					tactileCard(c, t).Padding(16).Gap(10).Children(func() {
+						ui.Text(c, "按目筛选").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
+						ui.Row(c).FillWidth().Gap(8).Wrap().Children(func() {
+							for i, ord := range matchedOrders {
+								o := ord
+								if filterPill(c, fmt.Sprintf("gfo-%d-%s", i, o), o, a.guideOrder == o, t).Clicked() {
+									a.guideOrder = o
+									a.guideFamily = "全部科"
+									a.applyGuideFilter()
+								}
+							}
+						})
+					})
+				}
+
+				if len(matchedFamilies) > 0 {
+					tactileCard(c, t).Padding(16).Gap(10).Children(func() {
+						ui.Text(c, "按科筛选").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
+						ui.Row(c).FillWidth().Gap(8).Wrap().Children(func() {
+							for i, fam := range matchedFamilies {
+								f := fam
+								if filterPill(c, fmt.Sprintf("gff-%d-%s", i, f), f, a.guideFamily == f, t).Clicked() {
+									a.guideFamily = f
+									a.applyGuideFilter()
+								}
+							}
+						})
+					})
+				}
 			})
 		})
 	})
@@ -582,7 +779,7 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 
 	ui.Scroll(c.Key("gd-scroll")).Fill().Children(func() {
 		ui.Column(c).FillWidth().Padding(0, 0, 44, 0).Gap(0).Children(func() {
-			// 1. 全出血 Hero 摄影轮播区（顶部真实 Liquid Glass 悬浮按钮）
+			// 1. 全出血 Hero 摄影轮播区（顶部自研光学液态玻璃悬浮按钮 + 骨架扫光跳跃加载）
 			count := 0
 			if media != nil {
 				count = len(media.Photos)
@@ -597,32 +794,31 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 						slide := ui.Box(c.Key(fmt.Sprintf("gslide-%d", i))).Fill().
 							Role(ui.RoleButton).Label("点击放大图片")
 						slide.Children(func() {
-							netimage.Image(c, media.Photos[i].URL, netimage.Options{
-								MaxSide:     1200,
-								Fit:         ui.Cover,
-								Placeholder: t.Surface,
-							}).Fill()
+							src, _ := netimage.Load(c, media.Photos[i].URL, netimage.Options{MaxSide: 1200})
+							if src != nil {
+								ui.Image(c, src).Fill().Fit(ui.Cover).Role(ui.RoleImage)
+							} else {
+								skeletonBirdCard(c, 0, 46, t)
+							}
 						})
 						if slide.Clicked() {
 							a.openNetworkPhotosViewer(tx.ComName, media.Photos, i)
 						}
 					}).Fill()
-				} else if busy {
-					ui.Box(c).Fill().Center().Children(func() {
-						ui.Spinner(c).Label("加载图集中")
-					})
+				} else if media == nil || busy {
+					skeletonBirdCard(c, 0, 46, t)
 				} else {
 					ui.Box(c).Fill().Center().Children(func() {
 						ui.Icon(c, iconBird).FontSize(48).TextColor(t.TextMuted.Alpha(0.28))
 					})
 				}
 
-				ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(84).PassThrough().LinearGradient(ui.LinearGradient{
-					From:  ui.RGBA(0, 0, 0, 0.34),
-					To:    ui.RGBA(0, 0, 0, 0),
-					Angle: 180,
-				})
 				if count > 0 {
+					ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(84).PassThrough().LinearGradient(ui.LinearGradient{
+						From:  ui.RGBA(0, 0, 0, 0.34),
+						To:    ui.RGBA(0, 0, 0, 0),
+						Angle: 180,
+					})
 					ui.Box(c).Absolute().Left(0).Bottom(0).Right(0).Height(72).PassThrough().LinearGradient(ui.LinearGradient{
 						From:  ui.RGBA(0, 0, 0, 0),
 						To:    ui.RGBA(0, 0, 0, 0.48),
@@ -636,9 +832,8 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 				}
 
 				logBtn := ui.Row(c.Key("gd-top-log")).Height(36).PaddingX(14).Radius(18).
-					Material(glass.Glass{Style: glass.Clear, Interactive: true, Tint: ui.RGBA(0, 0, 0, 0.22)}).
-					Border(1, ui.RGBA(255, 255, 255, 0.28)).
-					Shadow(0, 4, 14, 0, ui.RGBA(0, 0, 0, 0.26)).
+					Material(photoOverlayGlass(true)).
+					Shadow(0, 4, 14, 0, ui.RGBA(0, 0, 0, 0.28)).
 					Gap(5).AlignItems(ui.Center).
 					Absolute().Right(16).Top(topBtnY).
 					Role(ui.RoleButton).Label("记日志")
@@ -653,9 +848,8 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 				if count > 0 {
 					idx := max(0, min(a.guideGallery.Page, count-1))
 					ui.Textf(c, "%d / %d", idx+1, count).
-						Absolute().Left(18).Bottom(38).Padding(3, 10).Radius(999).
-						Material(glass.Glass{Style: glass.Clear, Tint: ui.RGBA(0, 0, 0, 0.26)}).
-						Border(1, ui.RGBA(255, 255, 255, 0.24)).
+						Absolute().Left(18).Bottom(38).Padding(4, 10).Radius(999).
+						Material(photoOverlayGlass(false)).
 						FontSize(12).FontWeight(500).FontFeatures("tnum").
 						TextColor(ui.RGB(255, 255, 255))
 					if count > 1 {
@@ -679,12 +873,12 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 				t,
 			)
 			sheet.Children(func() {
-				// 物种名片头
-				ui.Column(c).FillWidth().Padding(0, 2).Gap(6).Children(func() {
+				// 物种名片头（严格对齐下方实体卡片左缘）
+				ui.Column(c).FillWidth().Gap(6).Children(func() {
 					ui.Text(c, tx.ComName).FontSize(24).FontWeight(600).LetterSpacing(-0.1)
 					ui.Text(c, tx.SciName).FontSize(14).Italic().TextColor(t.TextMuted)
 
-					ui.Row(c).Gap(6).Wrap().Padding(2, 0, 0, 0).Children(func() {
+					ui.Row(c).Gap(6).Wrap().Padding(2, 0, 0, 0).AlignItems(ui.Center).Children(func() {
 						if taxLine := model.FormatTaxonLine(tx); taxLine != "" {
 							statusPill(c, taxLine, softPillColor(t), secondaryTextColor(t))
 						}
@@ -727,7 +921,7 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 					})
 
 					if media == nil && busy {
-						ui.Text(c, "正在检索鸟鸣参考录音…").FontSize(13).TextColor(t.TextMuted)
+						skeletonAudioRows(c, 3, t)
 					} else if media == nil || len(media.Sounds) == 0 {
 						ui.Text(c, "暂无公开鸟鸣录音，可在「设置」补充 Xeno-canto Key 扩展曲库。").
 							FontSize(13).TextColor(t.TextMuted).LineHeight(1.5)
@@ -787,21 +981,21 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 				tactileCard(c, t).Padding(16).Gap(10).Selectable().Children(func() {
 					ui.Text(c, "物种简介").FontSize(16).FontWeight(600)
 					if media == nil && busy {
-						ui.Text(c, "正在加载中文维基百科简介…").FontSize(13).TextColor(t.TextMuted)
+						skeletonTextLines(c, t)
 					} else if media != nil && media.Wiki != nil && media.Wiki.Extract != "" {
 						ui.Text(c, media.Wiki.Extract).FontSize(15).LineHeight(1.75).TextColor(secondaryTextColor(t))
 					} else {
 						ui.Text(c, "中文维基百科暂未收录该鸟种的摘要说明。").FontSize(13).TextColor(t.TextMuted)
 					}
 
-					ui.Row(c).Gap(16).Wrap().Padding(4, 0, 0, 0).Children(func() {
+					ui.Row(c).Gap(8).Wrap().Padding(4, 0, 0, 0).Children(func() {
 						if media != nil && media.Wiki != nil && media.Wiki.PageURL != "" {
-							ui.Link(c, "中文维基全文 ↗", media.Wiki.PageURL)
+							externalLinkChip(c, "gd-link-wiki", "中文维基", iconWikipedia, media.Wiki.PageURL, t)
 						}
 						if media != nil && media.INatURL != "" {
-							ui.Link(c, "iNaturalist ↗", media.INatURL)
+							externalLinkChip(c, "gd-link-inat", "iNaturalist", iconINaturalist, media.INatURL, t)
 						}
-						ui.Link(c, "eBird 分布 ↗", fmt.Sprintf("https://ebird.org/species/%s", tx.SpeciesCode))
+						externalLinkChip(c, "gd-link-ebird", "eBird 分布", iconEBird, fmt.Sprintf("https://ebird.org/species/%s", tx.SpeciesCode), t)
 					})
 				})
 

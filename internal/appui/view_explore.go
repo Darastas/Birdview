@@ -12,7 +12,6 @@ import (
 	"github.com/Darastas/Birdview/internal/api"
 	"github.com/Darastas/Birdview/internal/model"
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
 	"github.com/egoist/mygo/ui/netimage"
@@ -303,7 +302,7 @@ func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 					)
 					locBtn.Children(func() {
 						ui.Icon(c, iconMapPin).FontSize(13).TextColor(opticalAccentColor(t))
-						ui.Text(c, a.exploreRegionButtonText()+" ▾").FontSize(13).FontWeight(500).SingleLine()
+						ui.Text(c, a.exploreRegionButtonText()).FontSize(13).FontWeight(500).SingleLine()
 					})
 					if locBtn.Clicked() {
 						a.regRegionTarget = "explore"
@@ -318,21 +317,24 @@ func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 			}
 		})
 
-		scroll := ui.Scroll(c.Key(fmt.Sprintf("exp-scroll-%d", a.session.ExploreSubTab))).Grow(1).Basis(0).FillWidth()
-		if scroll.PullToRefresh(&a.exploreRefresh) {
-			a.LoadExploreData()
-		}
-		scroll.Children(func() {
-			ui.Column(c).FillWidth().Padding(6, 18, 106, 18).Gap(14).Children(func() {
-				switch a.session.ExploreSubTab {
-				case 0:
-					a.buildExplorePhotoFeed(c, t)
-				case 1, 2:
-					a.buildExploreEbirdObsFeed(c, t)
-				case 3:
-					a.buildExploreHotspotsFeed(c, t)
-				}
+		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
+			scroll := ui.Scroll(c.Key(fmt.Sprintf("exp-scroll-%d", a.session.ExploreSubTab))).Fill()
+			if scroll.PullToRefresh(&a.exploreRefresh) {
+				a.LoadExploreData()
+			}
+			scroll.Children(func() {
+				ui.Column(c).FillWidth().Padding(12, 18, 106, 18).Gap(14).Children(func() {
+					switch a.session.ExploreSubTab {
+					case 0:
+						a.buildExplorePhotoFeed(c, t)
+					case 1, 2:
+						a.buildExploreEbirdObsFeed(c, t)
+					case 3:
+						a.buildExploreHotspotsFeed(c, t)
+					}
+				})
 			})
+			scrollTopFadeScrim(c, t)
 		})
 	})
 }
@@ -343,6 +345,22 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, a.regPhotoErr).FontSize(13).TextColor(t.Danger)
 			if filterPill(c, "fp-retry", "重新加载", false, t).Clicked() {
 				a.loadExploreFieldPhotos()
+			}
+		})
+		return
+	}
+	if len(a.regFieldPhotos) == 0 && a.regPhotoBusy {
+		ui.Column(c).FillWidth().Gap(16).Children(func() {
+			for range 2 {
+				tactileCard(c, t).Clip().Children(func() {
+					ui.Box(c).FillWidth().Height(228).Children(func() {
+						skeletonBirdCard(c, 0, 42, t)
+					})
+					ui.Column(c).FillWidth().Padding(14, 16).Gap(8).Children(func() {
+						skeletonShimmerBox(c, 6, t).WidthPercent(46).Height(16)
+						skeletonShimmerBox(c, 5, t).WidthPercent(72).Height(12)
+					})
+				})
 			}
 		})
 		return
@@ -368,23 +386,22 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 				Role(ui.RoleButton).Label(obsItem.ComName + " 现场实拍")
 			card.Children(func() {
 				ui.Box(c).FillWidth().Height(228).Background(softPillColor(t)).Children(func() {
-					netimage.Image(c, obsItem.Photos[0].URL, netimage.Options{
-						MaxSide:     960,
-						Fit:         ui.Cover,
-						Placeholder: softPillColor(t),
-					}).Fill()
+					photoSrc, _ := netimage.Load(c, obsItem.Photos[0].URL, netimage.Options{MaxSide: 960})
+					if photoSrc != nil {
+						ui.Image(c, photoSrc).Fill().Fit(ui.Cover).Role(ui.RoleImage)
+					} else {
+						skeletonBirdCard(c, 0, 42, t)
+					}
 
 					ui.Row(c).Absolute().Right(12).Top(12).Gap(6).Children(func() {
 						if len(obsItem.Sounds) > 0 {
-							ui.Text(c, "录音").FontSize(11).FontWeight(500).Padding(4, 9).Radius(999).
-								Material(glass.Glass{Style: glass.Clear, Tint: ui.RGBA(0, 0, 0, 0.28)}).
-								Border(1, ui.RGBA(255, 255, 255, 0.25)).
+							ui.Text(c, "录音").FontSize(11).FontWeight(500).Padding(4, 10).Radius(999).
+								Material(photoOverlayGlass(false)).
 								TextColor(ui.RGB(255, 255, 255))
 						}
 						if len(obsItem.Photos) > 1 {
-							ui.Textf(c, "1/%d", len(obsItem.Photos)).FontSize(11).FontWeight(500).Padding(4, 9).Radius(999).
-								Material(glass.Glass{Style: glass.Clear, Tint: ui.RGBA(0, 0, 0, 0.28)}).
-								Border(1, ui.RGBA(255, 255, 255, 0.25)).
+							ui.Textf(c, "1/%d", len(obsItem.Photos)).FontSize(11).FontWeight(500).Padding(4, 10).Radius(999).
+								Material(photoOverlayGlass(false)).
 								FontFeatures("tnum").
 								TextColor(ui.RGB(255, 255, 255))
 						}
@@ -402,7 +419,7 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 			})
 			if card.Clicked() {
 				a.regActivePhoto = &obsItem
-				a.regPhotoPager.Page = 0
+				a.regPhotoPager = mobile.PageState{}
 				a.router.Push(fmt.Sprintf("/explore/photo/%d", obsItem.ID))
 			}
 		}
@@ -421,15 +438,18 @@ func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
 	}
 
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-		ui.Row(c).Gap(8).Children(func() {
-			for _, label := range []string{"7天", "14天", "30天"} {
-				l := label
-				if filterPill(c, "back-"+l, l, a.regBackLabel == l, t).Clicked() {
-					a.regBackLabel = l
-					a.LoadExploreData()
-				}
+		backOpts := []string{"7天", "14天", "30天"}
+		backIdx := 1
+		for i, l := range backOpts {
+			if a.regBackLabel == l {
+				backIdx = i
+				break
 			}
-		})
+		}
+		if tactileCompactSegment(c, "obs-back-seg", &backIdx, t, backOpts...) {
+			a.regBackLabel = backOpts[backIdx]
+			a.LoadExploreData()
+		}
 		if len(a.regObsList) > 0 {
 			ui.Textf(c, "%d 条记录", len(a.regObsList)).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
 		}
@@ -499,16 +519,9 @@ func (a *AppState) buildExploreHotspotsFeed(c *ui.Context, t *ui.Theme) {
 	}
 
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-		ui.Row(c).Gap(8).Children(func() {
-			if filterPill(c, "hsort-cnt", "鸟种最多", a.hsSortMode == 0, t).Clicked() {
-				a.hsSortMode = 0
-				a.applyHotspotFilterAndSort()
-			}
-			if filterPill(c, "hsort-dt", "最近活跃", a.hsSortMode == 1, t).Clicked() {
-				a.hsSortMode = 1
-				a.applyHotspotFilterAndSort()
-			}
-		})
+		if tactileCompactSegment(c, "hs-sort-seg", &a.hsSortMode, t, "鸟种最多", "最近活跃") {
+			a.applyHotspotFilterAndSort()
+		}
 		if len(a.hsFiltered) > 0 {
 			ui.Textf(c, "%d 个热点", len(a.hsFiltered)).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
 		}
@@ -593,11 +606,12 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 					slide := ui.Box(c.Key(fmt.Sprintf("fpslide-%d", i))).Fill().
 						Role(ui.RoleButton).Label("点击放大查看实拍图")
 					slide.Children(func() {
-						netimage.Image(c, item.Photos[i].URL, netimage.Options{
-							MaxSide:     1200,
-							Fit:         ui.Cover,
-							Placeholder: t.Surface,
-						}).Fill()
+						src, _ := netimage.Load(c, item.Photos[i].URL, netimage.Options{MaxSide: 1200})
+						if src != nil {
+							ui.Image(c, src).Fill().Fit(ui.Cover).Role(ui.RoleImage)
+						} else {
+							skeletonBirdCard(c, 0, 46, t)
+						}
 					})
 					if slide.Clicked() {
 						a.openNetworkPhotosViewer(item.ComName+"（现场实拍）", item.Photos, i)
@@ -615,9 +629,8 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 				}
 				if count > 0 {
 					ui.Textf(c, "%d / %d", a.regPhotoPager.Page+1, count).
-						Absolute().Left(18).Bottom(38).Padding(3, 10).Radius(999).
-						Material(glass.Glass{Style: glass.Clear, Tint: ui.RGBA(0, 0, 0, 0.26)}).
-						Border(1, ui.RGBA(255, 255, 255, 0.24)).
+						Absolute().Left(18).Bottom(38).Padding(4, 10).Radius(999).
+						Material(photoOverlayGlass(false)).
 						FontSize(12).FontWeight(500).FontFeatures("tnum").
 						TextColor(ui.RGB(255, 255, 255))
 					if count > 1 {
@@ -646,7 +659,7 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 					ui.Textf(c, "现场拍摄：%s", item.Observer).FontSize(12).TextColor(t.TextMuted)
 					if item.ObsURL != "" {
 						ui.Box(c).Padding(4, 0, 0, 0).Children(func() {
-							ui.Link(c, "打开 iNaturalist 现场原记录 ↗", item.ObsURL)
+							externalLinkChip(c, "ep-link-inat", "iNaturalist 现场原记录", iconINaturalist, item.ObsURL, t)
 						})
 					}
 				})

@@ -60,16 +60,21 @@ func TestEbirdClientAndLocale(t *testing.T) {
 }
 
 func TestGuideMediaVsRegionalFieldPhotosSeparation(t *testing.T) {
+	var wikiLang string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/taxa"):
-			w.Write([]byte(`{"results":[{"id":2599,"observations_count":500,"default_photo":{"medium_url":"https://example.com/guide_medium.jpg","attribution":"GuidePhoto"}}]}`))
+			w.Write([]byte(`{"results":[
+				{"id":1,"name":"Alcedo atthis taprobana","observations_count":10,"default_photo":{"medium_url":"https://example.com/subspecies_medium.jpg","attribution":"Subspecies"}},
+				{"id":2599,"name":"Alcedo atthis","observations_count":500,"default_photo":{"medium_url":"https://example.com/guide_medium.jpg","attribution":"GuidePhoto"}}
+			]}`))
 		case strings.HasPrefix(r.URL.Path, "/observations") && r.URL.Query().Get("lat") != "":
 			w.Write([]byte(`{"results":[{"id":999,"observed_on":"2026-11-24","place_guess":"北京沙河水库","quality_grade":"research","taxon":{"name":"Alcedo atthis","preferred_common_name":"普通翠鸟"},"user":{"name":"现场拍摄者"},"photos":[{"url":"https://example.com/field_square.jpg","attribution":"FieldObs"}]}]}`))
 		case strings.HasPrefix(r.URL.Path, "/observations"):
 			w.Write([]byte(`{"results":[{"quality_grade":"research","place_guess":"测试地","user":{"login":"u1"},"sounds":[{"file_url":"https://example.com/call.mp3","file_content_type":"audio/mpeg"}]}]}`))
 		case strings.HasPrefix(r.URL.Path, "/page/summary/"):
-			w.Write([]byte(`{"title":"普通翠鸟","extract":"一种小型翠鸟。"}`))
+			wikiLang = r.Header.Get("Accept-Language")
+			w.Write([]byte(`{"title":"普通翠鸟","extract":"一种小型翠鸟。","content_urls":{"desktop":{"page":"https://zh.wikipedia.org/wiki/%E6%99%AE%E9%80%9A%E7%BF%A0%E9%B8%9F"}}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -82,10 +87,13 @@ func TestGuideMediaVsRegionalFieldPhotosSeparation(t *testing.T) {
 
 	guide := c.FetchSpeciesGuideMedia(context.Background(), "Alcedo atthis", "普通翠鸟", "")
 	if len(guide.Photos) == 0 || !strings.Contains(guide.Photos[0].URL, "guide_large.jpg") {
-		t.Fatalf("expected guide photo, got %+v", guide.Photos)
+		t.Fatalf("expected exact species match guide photo, got %+v", guide.Photos)
 	}
 	if len(guide.Sounds) == 0 || guide.Wiki == nil {
 		t.Fatalf("expected guide sound and wiki, got sounds=%v wiki=%v", guide.Sounds, guide.Wiki)
+	}
+	if wikiLang != "zh-cn" || !strings.Contains(guide.Wiki.PageURL, "zh.wikipedia.org/zh-cn/") {
+		t.Fatalf("expected zh-cn wiki request and desktop link, lang=%q url=%q", wikiLang, guide.Wiki.PageURL)
 	}
 
 	fieldObs, err := c.FetchRegionalPhotoObservations(context.Background(), 39.9, 116.4, 25, 10)

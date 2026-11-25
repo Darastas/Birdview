@@ -31,17 +31,24 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 		wikiSummary *model.WikiSummary
 	)
 
-	// 1. iNaturalist 物种信息与标准配图
+	// 1. iNaturalist 物种信息与标准配图（优先精确匹配拉丁学名，避免误命中亚种或近缘种）
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		u := fmt.Sprintf("%s/taxa?q=%s&rank=species&per_page=1&locale=zh-CN",
-			c.INatBaseURL, url.QueryEscape(sciName))
+		trimmedSci := strings.TrimSpace(sciName)
+		u := fmt.Sprintf("%s/taxa?q=%s&rank=species&per_page=5&locale=zh-CN",
+			c.INatBaseURL, url.QueryEscape(trimmedSci))
 		var resp inatTaxaResp
 		if err := c.getJSON(ctx, u, nil, &resp); err != nil || len(resp.Results) == 0 {
 			return
 		}
 		taxon := resp.Results[0]
+		for _, candidate := range resp.Results {
+			if strings.EqualFold(strings.TrimSpace(candidate.Name), trimmedSci) {
+				taxon = candidate
+				break
+			}
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		res.INatTaxonID = taxon.ID
@@ -166,7 +173,7 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 		}()
 	}
 
-	// 4. 中文维基百科摘要
+	// 4. 中文维基百科摘要（强制大陆简体中文）
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -177,15 +184,17 @@ func (c *Client) FetchSpeciesGuideMedia(ctx context.Context, sciName, comName, x
 		if sciName != "" && sciName != comName {
 			titles = append(titles, sciName)
 		}
+		wikiHeaders := map[string]string{"Accept-Language": "zh-cn"}
 		for _, title := range titles {
 			u := fmt.Sprintf("%s/page/summary/%s", c.WikiBaseURL, url.PathEscape(title))
 			var w wikiResp
-			if err := c.getJSON(ctx, u, nil, &w); err == nil && w.Extract != "" {
+			if err := c.getJSON(ctx, u, wikiHeaders, &w); err == nil && w.Extract != "" {
+				pageURL := strings.Replace(w.ContentURLs.Desktop.Page, "zh.wikipedia.org/wiki/", "zh.wikipedia.org/zh-cn/", 1)
 				wikiSummary = &model.WikiSummary{
 					Title:       w.Title,
 					Description: w.Description,
 					Extract:     w.Extract,
-					PageURL:     w.ContentURLs.Desktop.Page,
+					PageURL:     pageURL,
 					Thumbnail:   w.Thumbnail.Source,
 					Source:      "中文维基百科",
 				}

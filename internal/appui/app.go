@@ -14,7 +14,6 @@ import (
 	"github.com/Darastas/Birdview/internal/model"
 	"github.com/Darastas/Birdview/internal/store"
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/plugins/location"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
@@ -27,13 +26,14 @@ var tabRoutes = []string{"/guide", "/explore", "/journal", "/settings"}
 
 // MobileSession 保存轻量移动端页面切换状态，供 mygo.KeepState 热恢复。
 type MobileSession struct {
-	Tab            int
-	GuideScope     int
-	GuideQuery     string
-	ExploreSubTab  int
-	JournalSubTab  int
-	JournalQuery   string
-	LifelistFilter string
+	Tab               int
+	GuideScope        int
+	GuideOnlyUnlocked bool
+	GuideQuery        string
+	ExploreSubTab     int
+	JournalSubTab     int
+	JournalQuery      string
+	LifelistFilter    string
 }
 
 // AppState 管理移动端路由、数据加载、音频控制与原生 UI 视图状态。
@@ -78,6 +78,8 @@ type AppState struct {
 	guideList        ui.ListState
 	guideRefresh     ui.RefreshState
 	guideFilterSheet bool
+	guideFilterQuery string
+	guideScopeSheet  bool
 	guideActiveCode  string
 	guideMediaMap    map[string]*model.SpeciesMedia
 	guideMediaBusy   map[string]bool
@@ -153,6 +155,7 @@ type AppState struct {
 	zoomPhotos     []model.MediaPhoto
 	zoomLocalPaths []string
 	zoomPager      mobile.PageState
+	zoomLastPage   int
 	zoomState      mobile.ZoomState
 
 	// 设置状态
@@ -178,6 +181,10 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client, sess *
 	}
 	if sess.Tab < 0 || sess.Tab >= len(tabRoutes) {
 		sess.Tab = 0
+	}
+	if sess.GuideScope == 3 {
+		sess.GuideScope = 0
+		sess.GuideOnlyUnlocked = true
 	}
 	cfg := st.Settings()
 	var thumbs map[string]string
@@ -381,6 +388,7 @@ func (a *AppState) View(c *ui.Context) {
 	})
 
 	a.viewRegionPickerSheet(c, t)
+	a.viewGuideScopeSheet(c, t)
 	a.viewGuideFilterSheet(c, t)
 	a.viewJournalComposerSheet(c, t)
 	a.viewJournalPhotoActionSheet(c)
@@ -406,14 +414,12 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme, aboveDock bool)
 	}
 
 	card := ui.Column(c.Key("mini-audio-bar")).Absolute().Left(16).Right(16).Bottom(barBottom).
-		Radius(18).Clip().
-		Material(glass.Glass{Style: glass.Regular})
+		Radius(28).Clip().
+		Material(floatingBarGlass(t.Dark))
 	if t.Dark {
-		card.Border(1, ui.RGBA(255, 255, 255, 0.14)).
-			Shadow(0, 10, 26, -4, ui.RGBA(0, 0, 0, 0.5))
+		card.Shadow(0, 10, 26, -4, ui.RGBA(0, 0, 0, 0.5))
 	} else {
-		card.Border(1, ui.RGBA(255, 255, 255, 0.72)).
-			Shadow(0, 8, 22, -4, ui.RGBA(15, 23, 42, 0.14))
+		card.Shadow(0, 8, 22, -4, ui.RGBA(15, 23, 42, 0.14))
 	}
 
 	card.Children(func() {
@@ -456,19 +462,6 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme, aboveDock bool)
 				a.player.Stop()
 			}
 		})
-
-		if st.Duration > 0 {
-			frac := float32(st.Position) / float32(st.Duration)
-			if frac < 0 {
-				frac = 0
-			} else if frac > 1 {
-				frac = 1
-			}
-			optA, _ := opticalAccentColors(t)
-			ui.Box(c).FillWidth().Height(2.5).Background(subtleHairlineColor(t)).Draw(func(p *ui.Painter, r ui.Rect) {
-				p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * frac, H: r.H}, optA, 1.2)
-			})
-		}
 	})
 }
 
@@ -559,10 +552,12 @@ func (a *AppState) openNetworkPhotosViewer(title string, photos []model.MediaPho
 	if len(photos) == 0 {
 		return
 	}
+	page := max(0, min(idx, len(photos)-1))
 	a.zoomTitle = title
 	a.zoomPhotos = photos
 	a.zoomLocalPaths = nil
-	a.zoomPager.Page = max(0, min(idx, len(photos)-1))
+	a.zoomPager = mobile.PageState{Page: page}
+	a.zoomLastPage = page
 	a.zoomState.Reset()
 	a.zoomOpen = true
 }
@@ -571,10 +566,12 @@ func (a *AppState) openLocalPhotosViewer(title string, paths []string, idx int) 
 	if len(paths) == 0 {
 		return
 	}
+	page := max(0, min(idx, len(paths)-1))
 	a.zoomTitle = title
 	a.zoomPhotos = nil
 	a.zoomLocalPaths = paths
-	a.zoomPager.Page = max(0, min(idx, len(paths)-1))
+	a.zoomPager = mobile.PageState{Page: page}
+	a.zoomLastPage = page
 	a.zoomState.Reset()
 	a.zoomOpen = true
 }
@@ -587,6 +584,10 @@ func (a *AppState) viewPhotoZoomOverlay(c *ui.Context, t *ui.Theme) {
 	if count == 0 {
 		a.zoomOpen = false
 		return
+	}
+	if a.zoomPager.Page != a.zoomLastPage {
+		a.zoomLastPage = a.zoomPager.Page
+		a.zoomState.Reset()
 	}
 	top, _, bottom, _ := c.SafeArea()
 
@@ -639,11 +640,13 @@ func (a *AppState) viewPhotoZoomOverlay(c *ui.Context, t *ui.Theme) {
 func (a *AppState) renderZoomSlide(c *ui.Context, i int) {
 	if len(a.zoomPhotos) > 0 && i < len(a.zoomPhotos) {
 		p := a.zoomPhotos[i]
-		netimage.Image(c.Key(fmt.Sprintf("zimg-%d", i)), p.URL, netimage.Options{
-			MaxSide:     1800,
-			Fit:         ui.Contain,
-			Placeholder: ui.RGBA(255, 255, 255, 0.05),
-		}).Fill()
+		src, _ := netimage.Load(c, p.URL, netimage.Options{MaxSide: 1800})
+		if src != nil {
+			ui.Image(c, src).Fit(ui.Contain).Fill().Label(a.zoomTitle)
+			return
+		}
+		darkTheme := ui.DarkTheme()
+		skeletonBirdCard(c, 16, 42, darkTheme)
 		return
 	}
 	if len(a.zoomLocalPaths) > 0 && i < len(a.zoomLocalPaths) {
@@ -652,9 +655,8 @@ func (a *AppState) renderZoomSlide(c *ui.Context, i int) {
 		if src, ok := a.localImgCache[lp]; ok {
 			ui.Image(c, src).Fit(ui.Contain).Fill().Label("本地观鸟照片")
 		} else {
-			ui.Box(c).Fill().Center().Children(func() {
-				ui.Spinner(c).Label("加载照片中")
-			})
+			darkTheme := ui.DarkTheme()
+			skeletonBirdCard(c, 16, 42, darkTheme)
 		}
 	}
 }

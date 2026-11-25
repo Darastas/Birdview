@@ -302,16 +302,31 @@ func monochromeButton(c *ui.Context, key any, label string, primary bool, t *ui.
 	return btn
 }
 
-// tactileSegmentedControl 绘制精密凹槽 + 立体浮雕滑块分段器（适配「探索」子分页与「设置 -> 外观主题」）。
+// tactileSegmentedControl 绘制全宽圆角凹槽 + 立体浮雕滑块分段器（曲率与搜索框保持一致）。
 func tactileSegmentedControl(c *ui.Context, key string, selected *int, t *ui.Theme, labels ...string) bool {
+	strip := tactileRecessedStyle(ui.Row(c.Key(key)).FillWidth().Height(40).Padding(3).Gap(2).Role(ui.RoleTabList), t, 20)
+	return renderSegmentItems(c, strip, key, selected, 34, 17, 6, true, t, labels...)
+}
+
+// tactileCompactSegment 绘制自适应宽度的紧凑阴刻分段切换器（适配已解锁开关与排序切换）。
+func tactileCompactSegment(c *ui.Context, key string, selected *int, t *ui.Theme, labels ...string) bool {
+	strip := tactileRecessedStyle(ui.Row(c.Key(key)).Height(34).Padding(3).Gap(2).Shrink(0).Role(ui.RoleTabList), t, 17)
+	return renderSegmentItems(c, strip, key, selected, 28, 14, 12, false, t, labels...)
+}
+
+func renderSegmentItems(c *ui.Context, strip ui.Element, key string, selected *int, itemH, itemR, padX float32, grow bool, t *ui.Theme, labels ...string) bool {
 	changed := false
-	strip := tactileRecessedStyle(ui.Row(c.Key(key)).FillWidth().Padding(3).Gap(2).Role(ui.RoleTabList), t, 13)
 	strip.Children(func() {
 		for i, lbl := range labels {
 			active := *selected == i
-			item := ui.Row(c.Key(fmt.Sprintf("%s-%d", key, i))).Grow(1).Basis(0).Height(34).Radius(10).
-				AlignItems(ui.Center).Justify(ui.Center).PaddingX(6).
+			item := ui.Row(c.Key(fmt.Sprintf("%s-%d", key, i))).Height(itemH).Radius(itemR).
+				AlignItems(ui.Center).Justify(ui.Center).PaddingX(padX).
 				Role(ui.RoleTab).Label(lbl).Checked(active)
+			if grow {
+				item.Grow(1).Basis(0)
+			} else {
+				item.Shrink(0)
+			}
 			fg := t.TextMuted
 			weight := 400
 			if active {
@@ -344,7 +359,7 @@ func tactileSegmentedControl(c *ui.Context, key string, selected *int, t *ui.The
 	return changed
 }
 
-// floatingGlassDock 绘制悬浮在内容之上的真正 GPU Liquid Glass 胶囊底部导航栏（含底部卷动边缘渐变）。
+// floatingGlassDock 绘制悬浮在内容之上的自研光学液态玻璃胶囊底部导航栏（含底部卷动边缘渐变）。
 func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme) bool {
 	_, _, bottom, _ := c.SafeArea()
 	if bottom > keyboardInsetThreshold {
@@ -361,22 +376,26 @@ func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme) bool {
 		{label: "设置", icon: iconNavSettings},
 	}
 
+	edgeBg := ui.Hex("#F7F8FB")
+	if t.Dark {
+		edgeBg = ui.Hex("#07090E")
+	}
 	// 底部柔化卷动渐隐边缘（让文字滑入悬空底座前自然淡出）
 	ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(92 + bottom).PassThrough().
-		Material(glass.ScrollEdge{Bottom: true})
+		Material(glass.ScrollEdge{Bottom: true, Background: edgeBg})
 
 	dockBottom := max(float32(12), bottom+6)
 	changed := false
 	dock := ui.Row(c.Key("min-bottom-bar")).Absolute().Left(16).Right(16).Bottom(dockBottom).
 		Height(62).Padding(5, 6).Radius(31).
-		Material(glass.Glass{Style: glass.Regular}).
+		Material(floatingBarGlass(t.Dark)).
 		Role(ui.RoleTabList)
 	if t.Dark {
-		dock.Border(1, ui.RGBA(255, 255, 255, 0.16)).
+		dock.
 			Shadow(0, 14, 34, -4, ui.RGBA(0, 0, 0, 0.58)).
 			Shadow(0, 2, 6, 0, ui.RGBA(0, 0, 0, 0.35))
 	} else {
-		dock.Border(1, ui.RGBA(255, 255, 255, 0.72)).
+		dock.
 			Shadow(0, 12, 30, -4, ui.RGBA(15, 23, 42, 0.16)).
 			Shadow(0, 2, 6, 0, ui.RGBA(15, 23, 42, 0.08))
 	}
@@ -434,22 +453,58 @@ func tactileIconBtn(c *ui.Context, key any, label string, svg *ui.SVG, size floa
 	return el
 }
 
-// liquidGlassCircleBtn 绘制覆盖于全出血照片上的真实 Liquid Glass 圆形悬浮按钮。
+// liquidGlassCircleBtn 绘制覆盖于全出血照片上的自研光学液态玻璃圆形悬浮按钮。
 func liquidGlassCircleBtn(c *ui.Context, key any, label string, svg *ui.SVG, size float32) ui.Element {
 	return ui.Box(c.Key(key)).Size(size, size).Radius(size/2).
-		Material(glass.Glass{Style: glass.Clear, Interactive: true, Tint: ui.RGBA(0, 0, 0, 0.22)}).
-		Border(1, ui.RGBA(255, 255, 255, 0.28)).
-		Shadow(0, 4, 14, 0, ui.RGBA(0, 0, 0, 0.26)).
+		Material(photoOverlayGlass(true)).
+		Shadow(0, 4, 14, 0, ui.RGBA(0, 0, 0, 0.28)).
 		Center().Shrink(0).
 		Role(ui.RoleButton).Label(label).Children(func() {
 		ui.Icon(c, svg).FontSize(size * 0.45).TextColor(ui.RGB(255, 255, 255))
 	})
 }
 
+// statusPill 绘制固定高度与光学居中的轻量信息徽章。
 func statusPill(c *ui.Context, text string, bg, fg ui.Color) {
-	ui.Row(c).Padding(3, 9).Radius(999).Background(bg).AlignItems(ui.Center).Shrink(0).Children(func() {
+	ui.Row(c).Height(24).PaddingX(10).Radius(12).Background(bg).
+		AlignItems(ui.Center).Justify(ui.Center).Shrink(0).Children(func() {
 		ui.Text(c, text).FontSize(11).FontWeight(500).TextColor(fg).SingleLine()
 	})
+}
+
+// externalLinkChip 绘制带品牌图标与微立体触感的外部资料跳转胶囊按钮。
+func externalLinkChip(c *ui.Context, key, label string, icon *ui.SVG, url string, t *ui.Theme) {
+	chip := applySculptedSecondaryPillStyle(
+		ui.Row(c.Key(key)).Height(34).PaddingX(12).Radius(17).
+			Gap(6).AlignItems(ui.Center).Justify(ui.Center).Shrink(0).
+			Role(ui.RoleButton).Label(label),
+		t,
+	)
+	chip.Children(func() {
+		ui.Icon(c, icon).FontSize(14).TextColor(opticalAccentColor(t))
+		ui.Text(c, label).FontSize(13).FontWeight(500).TextColor(t.Text).SingleLine()
+		ui.Icon(c, iconExternalLink).FontSize(12).TextColor(t.TextMuted)
+	})
+	if chip.Clicked() {
+		_ = mygo.Shell.OpenExternal(url)
+	}
+}
+
+// scrollTopFadeScrim 在滚动容器顶部叠加柔顺渐隐过渡遮罩，消除固定顶栏与滚动内容的生硬截断。
+func scrollTopFadeScrim(c *ui.Context, t *ui.Theme) {
+	topCol := ui.Hex("#EEF2F7")
+	if t.Dark {
+		topCol = ui.Hex("#0E121B")
+	}
+	ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(20).PassThrough().
+		LinearGradient(ui.LinearGradient{
+			Angle: 180,
+			Stops: []ui.GradientStop{
+				{Color: topCol.Alpha(0.98), At: 0},
+				{Color: topCol.Alpha(0.68), At: 0.48},
+				{Color: topCol.Alpha(0), At: 1.0},
+			},
+		})
 }
 
 func minimalDivider(c *ui.Context, t *ui.Theme) {
