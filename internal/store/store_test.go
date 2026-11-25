@@ -190,3 +190,20 @@ func TestCacheLRUEviction(t *testing.T) {
 		t.Fatalf("unexpected cache stats: bytes=%d files=%d", bytesCount, filesCount)
 	}
 }
+
+func TestCacheThumbIndex(t *testing.T) {
+	c, err := NewCache(t.TempDir(), 4*1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SaveThumbIndex(map[string]string{
+		"comkin1": "https://example.com/comkin1.jpg",
+		"creibi1": "https://example.com/creibi1.jpg",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := c.LoadThumbIndex()
+	if len(got) != 2 || got["comkin1"] != "https://example.com/comkin1.jpg" {
+		t.Fatalf("unexpected thumb index: %+v", got)
+	}
+}

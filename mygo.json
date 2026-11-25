@@ -1,6 +1,33 @@
 {
   "name": "Birdview",
   "identifier": "com.darastas.birdview",
-  "version": "1.0.0",
-  "out": "build"
+  "version": "2.0.0",
+  "out": "build",
+  "icon": "resources/icon.png",
+  "android": {
+    "minSdk": 26,
+    "permissions": [
+      "INTERNET",
+      "ACCESS_NETWORK_STATE",
+      "ACCESS_COARSE_LOCATION",
+      "ACCESS_FINE_LOCATION",
+      "RECORD_AUDIO"
+    ],
+    "adaptiveIcon": {
+      "foreground": "resources/icon-foreground.png",
+      "background": "#0284C7"
+    },
+    "splash": "#F3F5F8"
+  },
+  "ios": {
+    "orientations": [
+      "portrait"
+    ],
+    "infoPlist": {
+      "NSMicrophoneUsageDescription": "录制野外鸟鸣音频并保存到个人观鸟日志。",
+      "NSLocationWhenInUseUsageDescription": "获取当前位置以发现附近观鸟动态与观鸟热点。",
+      "NSCameraUsageDescription": "拍摄现场鸟类照片并保存到观鸟日志。",
+      "NSPhotoLibraryUsageDescription": "从相册选择观鸟照片添加到日志。"
+    }
+  }
 }
