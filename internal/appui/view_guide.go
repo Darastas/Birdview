@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Darastas/Birdview/internal/model"
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
 	"github.com/egoist/mygo/ui/netimage"
@@ -65,7 +66,6 @@ func (a *AppState) loadTaxonomyAsync(forceRefresh bool) {
 			}
 		}
 
-		// 先立即呈现名录，避免等待区域物种筛选接口时出现空列表
 		a.updateUI(func() {
 			a.SetTaxonomy(taxa, cachedChina, cachedRegion, defaultRegion)
 			key := a.store.LoadEbirdKey()
@@ -281,34 +281,33 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 	hasFilter := (a.guideOrder != "" && a.guideOrder != "全部目") || (a.guideFamily != "" && a.guideFamily != "全部科")
 
 	ui.Column(c).Fill().Children(func() {
-		// 极简留白顶部导航与搜索筛选
-		ui.Column(c).FillWidth().Padding(16, 20, 10, 20).Gap(12).Children(func() {
+		ui.Column(c).FillWidth().Padding(16, 18, 10, 18).Gap(12).Children(func() {
 			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "图鉴").FontSize(24).FontWeight(700).LetterSpacing(-0.4).Role(ui.RoleHeading).Level(1)
+				ui.Text(c, "图鉴").FontSize(26).FontWeight(600).LetterSpacing(-0.1).Role(ui.RoleHeading).Level(1)
 
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					if a.taxaLoading {
 						ui.Spinner(c).Label("更新名录中")
 					}
-					btnBg := t.Surface
-					btnFg := t.Text
 					lbl := "目科"
+					fg := t.Text
 					if hasFilter {
-						btnBg = t.Accent
-						btnFg = t.AccentText
+						fg = t.AccentText
 						lbl = fallbackText(strings.TrimPrefix(a.guideFamily, "全部科"), a.guideOrder)
 						if lbl == "" {
 							lbl = a.guideOrder
 						}
 					}
-					filterBtn := ui.Row(c.Key("guide-filter-open")).Height(32).PaddingX(12).Radius(16).
-						Background(btnBg).Gap(5).AlignItems(ui.Center).Role(ui.RoleButton).Label("目科筛选")
-					if !hasFilter && t.Dark {
-						filterBtn.Border(1, t.Border)
+					filterBtn := ui.Row(c.Key("guide-filter-open")).Height(34).PaddingX(14).Radius(17).
+						Gap(5).AlignItems(ui.Center).Role(ui.RoleButton).Label("目科筛选")
+					if hasFilter {
+						applySculptedPrimaryStyle(filterBtn, t)
+					} else {
+						applySculptedSecondaryPillStyle(filterBtn, t)
 					}
 					filterBtn.Children(func() {
-						ui.Icon(c, iconFilter).FontSize(13).TextColor(btnFg)
-						ui.Text(c, lbl).FontSize(12.5).FontWeight(500).TextColor(btnFg).SingleLine()
+						ui.Icon(c, iconFilter).FontSize(13).TextColor(fg)
+						ui.Text(c, lbl).FontSize(13).FontWeight(500).TextColor(fg).SingleLine()
 					})
 					if filterBtn.Clicked() {
 						a.guideFilterSheet = true
@@ -321,7 +320,7 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 			}
 
 			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(10).Children(func() {
-				ui.ScrollHorizontal(c.Key("guide-scopes")).Grow(1).Basis(0).Gap(6).Children(func() {
+				ui.ScrollHorizontal(c.Key("guide-scopes")).Grow(1).Basis(0).Gap(8).Padding(2, 0).Children(func() {
 					if filterPill(c, "scope-cn", "中国", a.session.GuideScope == 0, t).Clicked() {
 						a.session.GuideScope = 0
 						a.applyGuideFilter()
@@ -345,14 +344,15 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 				})
 
 				if a.taxaErr == "" {
-					ui.Textf(c, "%d 种", len(a.filteredTaxa)).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum").Shrink(0)
+					ui.Textf(c, "%d 种", len(a.filteredTaxa)).FontSize(12).FontWeight(500).TextColor(t.TextMuted).FontFeatures("tnum").Shrink(0)
 				}
 			})
 
 			if a.taxaErr != "" {
-				ui.Row(c).FillWidth().Padding(10, 14).Radius(12).Background(t.Danger.Alpha(0.08)).
+				ui.Row(c).FillWidth().Padding(10, 14).Radius(14).Background(t.Danger.Alpha(0.1)).
+					Border(1, t.Danger.Alpha(0.25)).
 					Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(10).Children(func() {
-					ui.Text(c, a.taxaErr).FontSize(12.5).TextColor(t.Danger).Grow(1)
+					ui.Text(c, a.taxaErr).FontSize(12).TextColor(t.Danger).Grow(1)
 					if filterPill(c, "taxa-retry", "重试", false, t).Clicked() {
 						a.loadTaxonomyAsync(true)
 					}
@@ -360,7 +360,7 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 			}
 		})
 
-		// 虚拟化双列摄影画册网格（无边框、无阴影、照片为主角）
+		// 虚拟化全出血立体摄影卡牌双列网格（丝绒暗部渐变 + 顶部高光描边 + 双层纵深阴影）
 		rowCount := (len(a.filteredTaxa) + 1) / 2
 		a.guideList.Key = func(r int) any {
 			idx := r * 2
@@ -379,7 +379,11 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 		list.Rows(func(row ui.ListRow) {
 			rc := row.Context
 			baseIdx := row.Index * 2
-			ui.Row(rc).FillWidth().Padding(4, 20, 14, 20).Gap(12).AlignItems(ui.Start).Children(func() {
+			padBottom := float32(12)
+			if row.Index == rowCount-1 {
+				padBottom = 104
+			}
+			ui.Row(rc).FillWidth().Padding(4, 18, padBottom, 18).Gap(12).AlignItems(ui.Start).Children(func() {
 				for col := 0; col < 2; col++ {
 					idx := baseIdx + col
 					if idx >= len(a.filteredTaxa) {
@@ -388,35 +392,64 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 					}
 					tx := a.filteredTaxa[idx]
 					unlocked := a.store.IsUnlocked(tx.SpeciesCode)
+					thumbURL := a.speciesThumbURL(tx.SpeciesCode)
 
-					tile := ui.Column(rc.Key("gtile-"+tx.SpeciesCode)).Grow(1).Basis(0).
-						Role(ui.RoleButton).Label(tx.ComName)
+					tile := applyCardRimAndShadow(
+						ui.Box(rc.Key("gtile-"+tx.SpeciesCode)).Grow(1).Basis(0).Height(206),
+						18, t,
+					).Clip().Role(ui.RoleButton).Label(tx.ComName)
+
 					tile.Children(func() {
-						ui.Box(rc).FillWidth().Height(148).Radius(14).Clip().Background(t.Surface).Children(func() {
-							thumbURL := a.speciesThumbURL(tx.SpeciesCode)
-							if thumbURL != "" {
-								netimage.Image(rc.Key("gt-"+tx.SpeciesCode), thumbURL, netimage.Options{
-									MaxSide:     360,
-									Fit:         ui.Cover,
-									Placeholder: t.Surface,
-								}).Fill()
-							} else {
-								a.queueSpeciesThumb(tx)
-								ui.Box(rc).Fill().Center().Children(func() {
-									ui.Icon(rc, iconBird).FontSize(26).TextColor(t.TextMuted.Alpha(0.28))
-								})
-							}
-							if unlocked {
-								ui.Box(rc).Absolute().Top(8).Right(8).Size(20, 20).Radius(10).
-									Background(t.Success).Center().Children(func() {
-									ui.Icon(rc, iconCheck).FontSize(11).TextColor(ui.RGB(255, 255, 255))
-								})
-							}
-						})
+						if thumbURL != "" {
+							netimage.Image(rc.Key("gt-"+tx.SpeciesCode), thumbURL, netimage.Options{
+								MaxSide:     420,
+								Fit:         ui.Cover,
+								Placeholder: t.Surface,
+							}).Fill()
 
-						ui.Column(rc).FillWidth().Padding(7, 2, 0, 2).Gap(1).Children(func() {
-							ui.Text(rc, tx.ComName).FontSize(14.5).FontWeight(600).TextColor(t.Text).SingleLine()
-							ui.Text(rc, model.FormatTaxonLine(tx)).FontSize(11.5).TextColor(t.TextMuted).SingleLine()
+							// 丝绒三段式底部渐隐遮罩：让白字铭牌浮现在清晰照片之上
+							ui.Box(rc).Absolute().Left(0).Bottom(0).Right(0).Height(96).PassThrough().
+								LinearGradient(ui.LinearGradient{
+									Angle: 180,
+									Stops: []ui.GradientStop{
+										{Color: ui.Transparent, At: 0},
+										{Color: ui.RGBA(8, 11, 17, 0.36), At: 0.45},
+										{Color: ui.RGBA(8, 11, 17, 0.86), At: 1.0},
+									},
+								})
+						} else {
+							a.queueSpeciesThumb(tx)
+							ph := ui.Box(rc).Fill().Center()
+							if t.Dark {
+								ph.LinearGradient(ui.LinearGradient{From: ui.Hex("#1E2432"), To: ui.Hex("#131722"), Angle: 180})
+							} else {
+								ph.LinearGradient(ui.LinearGradient{From: ui.Hex("#E7EDF5"), To: ui.Hex("#DCE4F0"), Angle: 180})
+							}
+							ph.Children(func() {
+								ui.Icon(rc, iconBird).FontSize(34).TextColor(t.TextMuted.Alpha(0.32))
+							})
+						}
+
+						if unlocked {
+							ui.Box(rc).Absolute().Top(10).Right(10).Size(22, 22).Radius(11).
+								Background(t.Success).
+								Border(1.5, ui.RGBA(255, 255, 255, 0.9)).
+								InsetShadow(0, 1, 0, 0, ui.RGBA(255, 255, 255, 0.35)).
+								Shadow(0, 2, 6, 0, ui.RGBA(0, 0, 0, 0.25)).
+								Center().Children(func() {
+								ui.Icon(rc, iconCheck).FontSize(11).TextColor(ui.RGB(255, 255, 255))
+							})
+						}
+
+						titleCol := t.Text
+						subCol := t.TextMuted
+						if thumbURL != "" {
+							titleCol = ui.RGB(255, 255, 255)
+							subCol = ui.RGBA(255, 255, 255, 0.80)
+						}
+						ui.Column(rc).Absolute().Left(0).Right(0).Bottom(0).Padding(0, 12, 12, 12).Gap(2).PassThrough().Children(func() {
+							ui.Text(rc, tx.ComName).FontSize(15).FontWeight(600).TextColor(titleCol).SingleLine()
+							ui.Text(rc, model.FormatTaxonLine(tx)).FontSize(12).FontWeight(400).TextColor(subCol).SingleLine()
 						})
 					})
 					if tile.Clicked() {
@@ -426,18 +459,24 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 			})
 		}).Children(func() {
 			if len(a.filteredTaxa) == 0 && !a.taxaLoading {
-				ui.Column(c).Fill().Center().Padding(32).Gap(10).Children(func() {
-					ui.Icon(c, iconBird).FontSize(34).TextColor(t.TextMuted.Alpha(0.4))
-					ui.Text(c, "暂无匹配的鸟种").FontSize(15.5).FontWeight(600)
-					ui.Text(c, "可切换浏览范围或清除关键词筛选").FontSize(13).TextColor(t.TextMuted)
-					if hasFilter || a.session.GuideQuery != "" {
-						if filterPill(c, "guide-reset-empty", "清除筛选条件", false, t).Clicked() {
-							a.session.GuideQuery = ""
-							a.guideOrder = "全部目"
-							a.guideFamily = "全部科"
-							a.applyGuideFilter()
+				ui.Box(c).Fill().Padding(24, 20, 104, 20).Center().Children(func() {
+					tactileCard(c, t).Padding(28).Center().Gap(10).Children(func() {
+						ui.Box(c).Size(52, 52).Radius(26).Center().Children(func() {
+							tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
+								ui.Icon(c, iconBird).FontSize(24).TextColor(t.TextMuted)
+							})
+						})
+						ui.Text(c, "暂无匹配的鸟种").FontSize(16).FontWeight(600)
+						ui.Text(c, "可切换浏览范围或清除关键词筛选").FontSize(13).TextColor(t.TextMuted)
+						if hasFilter || a.session.GuideQuery != "" {
+							if filterPill(c, "guide-reset-empty", "清除筛选条件", false, t).Clicked() {
+								a.session.GuideQuery = ""
+								a.guideOrder = "全部目"
+								a.guideFamily = "全部科"
+								a.applyGuideFilter()
+							}
 						}
-					}
+					})
 				})
 			}
 		})
@@ -454,7 +493,7 @@ func (a *AppState) viewGuideFilterSheet(c *ui.Context, t *ui.Theme) {
 		ui.Column(c).Fill().Children(func() {
 			ui.Row(c).FillWidth().Padding(8, 20, 14, 20).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 				rst := ui.Box(c.Key("gf-reset")).Padding(6, 4).Role(ui.RoleButton).Label("重置").Children(func() {
-					ui.Text(c, "重置").FontSize(14.5).TextColor(t.TextMuted)
+					ui.Text(c, "重置").FontSize(14).TextColor(t.TextMuted)
 				})
 				if rst.Clicked() {
 					a.guideOrder = "全部目"
@@ -468,9 +507,9 @@ func (a *AppState) viewGuideFilterSheet(c *ui.Context, t *ui.Theme) {
 			})
 			minimalDivider(c, t)
 
-			ui.Scroll(c.Key("gf-scroll")).Grow(1).Basis(0).FillWidth().Padding(16, 20, 28, 20).Gap(18).Children(func() {
-				ui.Column(c).FillWidth().Gap(10).Children(func() {
-					ui.Text(c, "按目筛选").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted)
+			ui.Scroll(c.Key("gf-scroll")).Grow(1).Basis(0).FillWidth().Padding(14, 18, 28, 18).Gap(14).Children(func() {
+				tactileCard(c, t).Padding(16).Gap(10).Children(func() {
+					ui.Text(c, "按目筛选").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
 					ui.Row(c).FillWidth().Gap(8).Wrap().Children(func() {
 						for i, ord := range a.guideOrders {
 							o := ord
@@ -483,10 +522,8 @@ func (a *AppState) viewGuideFilterSheet(c *ui.Context, t *ui.Theme) {
 					})
 				})
 
-				minimalDivider(c, t)
-
-				ui.Column(c).FillWidth().Gap(10).Children(func() {
-					ui.Text(c, "按科筛选").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted)
+				tactileCard(c, t).Padding(16).Gap(10).Children(func() {
+					ui.Text(c, "按科筛选").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
 					families := a.filteredFamiliesForOrder()
 					ui.Row(c).FillWidth().Gap(8).Wrap().Children(func() {
 						for i, fam := range families {
@@ -540,18 +577,19 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 	}
 	unlocked := a.store.IsUnlocked(tx.SpeciesCode)
 	top, _, _, _ := c.SafeArea()
-	topBtnY := max(float32(12), top+6)
+	topBtnY := max(float32(14), top+6)
+	optA, _ := opticalAccentColors(t)
 
-	ui.Scroll(c.Key("gd-scroll")).Fill().Background(t.Background).Children(func() {
-		ui.Column(c).FillWidth().Padding(0, 0, 36, 0).Gap(0).Children(func() {
-			// 1. 全出血 Hero 摄影轮播区（顶部浮动玻璃控制按钮）
+	ui.Scroll(c.Key("gd-scroll")).Fill().Children(func() {
+		ui.Column(c).FillWidth().Padding(0, 0, 44, 0).Gap(0).Children(func() {
+			// 1. 全出血 Hero 摄影轮播区（顶部真实 Liquid Glass 悬浮按钮）
 			count := 0
 			if media != nil {
 				count = len(media.Photos)
 			}
-			heroH := float32(320)
+			heroH := float32(352)
 			if top > 0 {
-				heroH = 310 + top
+				heroH = 340 + top
 			}
 			ui.Box(c).FillWidth().Height(heroH).Background(t.Surface).Children(func() {
 				if count > 0 {
@@ -575,83 +613,91 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 					})
 				} else {
 					ui.Box(c).Fill().Center().Children(func() {
-						ui.Icon(c, iconBird).FontSize(44).TextColor(t.TextMuted.Alpha(0.28))
+						ui.Icon(c, iconBird).FontSize(48).TextColor(t.TextMuted.Alpha(0.28))
 					})
 				}
 
-				// 顶部/底部柔和渐隐蒙版确保控件与页码清晰
-				ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(78).LinearGradient(ui.LinearGradient{
-					From:  ui.RGBA(0, 0, 0, 0.36),
+				ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(84).PassThrough().LinearGradient(ui.LinearGradient{
+					From:  ui.RGBA(0, 0, 0, 0.34),
 					To:    ui.RGBA(0, 0, 0, 0),
 					Angle: 180,
 				})
 				if count > 0 {
-					ui.Box(c).Absolute().Left(0).Bottom(0).Right(0).Height(56).LinearGradient(ui.LinearGradient{
+					ui.Box(c).Absolute().Left(0).Bottom(0).Right(0).Height(72).PassThrough().LinearGradient(ui.LinearGradient{
 						From:  ui.RGBA(0, 0, 0, 0),
-						To:    ui.RGBA(0, 0, 0, 0.44),
+						To:    ui.RGBA(0, 0, 0, 0.48),
 						Angle: 180,
 					})
 				}
 
-				// 浮动返回按钮
-				if glassCircleBtn(c, "gd-back", "返回", iconBack, 36).
+				if liquidGlassCircleBtn(c, "gd-back", "返回", iconBack, 38).
 					Absolute().Left(16).Top(topBtnY).Clicked() {
 					a.goBack()
 				}
 
-				// 浮动右侧记日志胶囊
-				logBtn := ui.Row(c.Key("gd-top-log")).Height(34).PaddingX(13).Radius(17).
-					Background(ui.RGBA(0, 0, 0, 0.42)).Gap(5).AlignItems(ui.Center).
+				logBtn := ui.Row(c.Key("gd-top-log")).Height(36).PaddingX(14).Radius(18).
+					Material(glass.Glass{Style: glass.Clear, Interactive: true, Tint: ui.RGBA(0, 0, 0, 0.22)}).
+					Border(1, ui.RGBA(255, 255, 255, 0.28)).
+					Shadow(0, 4, 14, 0, ui.RGBA(0, 0, 0, 0.26)).
+					Gap(5).AlignItems(ui.Center).
 					Absolute().Right(16).Top(topBtnY).
 					Role(ui.RoleButton).Label("记日志")
 				logBtn.Children(func() {
-					ui.Icon(c, iconPlus).FontSize(13.5).TextColor(ui.RGB(255, 255, 255))
-					ui.Text(c, "记日志").FontSize(12.5).FontWeight(600).TextColor(ui.RGB(255, 255, 255))
+					ui.Icon(c, iconPlus).FontSize(14).TextColor(ui.RGB(255, 255, 255))
+					ui.Text(c, "记日志").FontSize(13).FontWeight(500).TextColor(ui.RGB(255, 255, 255))
 				})
 				if logBtn.Clicked() {
 					a.OpenNewJournalModal(tx.SpeciesCode, "")
 				}
 
-				// 页码与指示点
 				if count > 0 {
 					idx := max(0, min(a.guideGallery.Page, count-1))
 					ui.Textf(c, "%d / %d", idx+1, count).
-						Absolute().Left(18).Bottom(14).
-						FontSize(12).FontWeight(600).FontFeatures("tnum").
-						TextColor(ui.RGBA(255, 255, 255, 0.92))
+						Absolute().Left(18).Bottom(38).Padding(3, 10).Radius(999).
+						Material(glass.Glass{Style: glass.Clear, Tint: ui.RGBA(0, 0, 0, 0.26)}).
+						Border(1, ui.RGBA(255, 255, 255, 0.24)).
+						FontSize(12).FontWeight(500).FontFeatures("tnum").
+						TextColor(ui.RGB(255, 255, 255))
 					if count > 1 {
-						ui.Box(c).Absolute().Right(16).Bottom(14).Children(func() {
+						ui.Box(c).Absolute().Right(16).Bottom(40).Children(func() {
 							mobile.PageDots(c, idx, count)
 						})
 					}
 				}
 			})
 
-			// 2. 杂志社论风纯平排版正文
-			ui.Column(c).FillWidth().Padding(20, 20, 0, 20).Gap(20).Children(func() {
-				// 标题与分类信息
-				ui.Column(c).FillWidth().Gap(5).Children(func() {
-					ui.Text(c, tx.ComName).FontSize(26).FontWeight(700).LetterSpacing(-0.4)
-					ui.Text(c, tx.SciName).FontSize(14).TextColor(t.TextMuted)
+			// 2. 重叠弧形立体详情承接面板（负外边距 + 顶部光影轮廓 + 立体质感卡片内容）
+			sheetRim := ui.RGBA(255, 255, 255, 0.85)
+			if t.Dark {
+				sheetRim = ui.RGBA(255, 255, 255, 0.14)
+			}
+			sheet := applyCanvasBackground(
+				ui.Column(c).FillWidth().Margin(-26, 0, 0, 0).Radius(26, 26, 0, 0).
+					BorderWidth(1, 0, 0, 0).BorderColor(sheetRim).
+					Shadow(0, -10, 28, 0, ui.RGBA(0, 0, 0, 0.16)).
+					Padding(22, 18, 0, 18).Gap(16),
+				t,
+			)
+			sheet.Children(func() {
+				// 物种名片头
+				ui.Column(c).FillWidth().Padding(0, 2).Gap(6).Children(func() {
+					ui.Text(c, tx.ComName).FontSize(24).FontWeight(600).LetterSpacing(-0.1)
+					ui.Text(c, tx.SciName).FontSize(14).Italic().TextColor(t.TextMuted)
 
-					meta := model.FormatTaxonLine(tx)
-					if media != nil && media.INatObservationsCount > 0 {
-						obsMeta := fmt.Sprintf("%d 条社区观测", media.INatObservationsCount)
-						if meta != "" {
-							meta += " · " + obsMeta
-						} else {
-							meta = obsMeta
+					ui.Row(c).Gap(6).Wrap().Padding(2, 0, 0, 0).Children(func() {
+						if taxLine := model.FormatTaxonLine(tx); taxLine != "" {
+							statusPill(c, taxLine, softPillColor(t), secondaryTextColor(t))
 						}
-					}
-					if meta != "" {
-						ui.Text(c, meta).FontSize(13).TextColor(secondaryTextColor(t)).Padding(2, 0, 0, 0)
-					}
+						if media != nil && media.INatObservationsCount > 0 {
+							statusPill(c, fmt.Sprintf("%d 条社区观测", media.INatObservationsCount), optA.Alpha(0.12), optA)
+						}
+					})
 
 					if count > 0 {
 						idx := max(0, min(a.guideGallery.Page, count-1))
 						curPhoto := media.Photos[idx]
 						ui.Textf(c, "图源：%s · %s", curPhoto.Source, curPhoto.Attribution).
-							FontSize(11.5).TextColor(t.TextMuted).SingleLine()
+							FontSize(12).TextColor(t.TextMuted).SingleLine()
 					}
 
 					if unlocked {
@@ -664,21 +710,19 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 							}
 						}
 						ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(4, 0, 0, 0).Children(func() {
-							ui.Icon(c, iconCheck).FontSize(13.5).TextColor(t.Success)
+							ui.Icon(c, iconCheck).FontSize(14).TextColor(t.Success)
 							ui.Text(c, fallbackText(firstText, "已在个人图谱中解锁")).
-								FontSize(12.5).FontWeight(500).TextColor(t.Success)
+								FontSize(13).FontWeight(500).TextColor(t.Success)
 						})
 					}
 				})
 
-				minimalDivider(c, t)
-
-				// 鸟鸣参考区（干净细线列表）
-				ui.Column(c).FillWidth().Gap(10).Children(func() {
+				// 鸟鸣参考实体卡片
+				tactileCard(c, t).Padding(16).Gap(12).Children(func() {
 					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, "鸟鸣参考").FontSize(16).FontWeight(600)
 						if media != nil && len(media.Sounds) > 0 {
-							ui.Textf(c, "%d 段", len(media.Sounds)).FontSize(12.5).TextColor(t.TextMuted)
+							ui.Textf(c, "%d 段", len(media.Sounds)).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
 						}
 					})
 
@@ -689,24 +733,34 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 							FontSize(13).TextColor(t.TextMuted).LineHeight(1.5)
 					} else {
 						pst := a.player.Status()
-						ui.Column(c).FillWidth().Dividers(1, t.Border).Children(func() {
+						ui.Column(c).FillWidth().Dividers(1, subtleHairlineColor(t)).Children(func() {
 							for i, snd := range media.Sounds {
 								snd := snd
 								isThis := pst.SourceKey == snd.URL
-								ui.Row(c.Key(fmt.Sprintf("gsnd-%d", i))).FillWidth().Padding(11, 0).Gap(12).AlignItems(ui.Center).Children(func() {
+								ui.Row(c.Key(fmt.Sprintf("gsnd-%d", i))).FillWidth().Padding(10, 0).Gap(12).AlignItems(ui.Center).Children(func() {
 									btnIcon := iconPlay
 									btnLbl := "播放"
-									btnBg := t.Surface
-									btnFg := t.Text
+									playBtn := ui.Box(c.Key(fmt.Sprintf("gsnd-b-%d", i))).Size(38, 38).Radius(19).Center().Shrink(0).
+										Role(ui.RoleButton).Label(btnLbl)
+									fg := t.Text
 									if isThis && (pst.Playing || pst.Loading) {
 										if pst.Playing {
 											btnIcon = iconPause
 											btnLbl = "暂停"
+											playBtn.Label(btnLbl)
 										}
-										btnBg = t.Accent
-										btnFg = t.AccentText
+										fg = ui.RGB(255, 255, 255)
+										c1, c2 := opticalAccentColors(t)
+										playBtn.LinearGradient(ui.LinearGradient{From: c1, To: c2, Angle: 180}).
+											InsetShadow(0, 1, 0, 0, ui.RGBA(255, 255, 255, 0.35)).
+											Shadow(0, 4, 12, 0, c1.Alpha(0.35))
+									} else {
+										applySculptedSecondaryPillStyle(playBtn, t)
 									}
-									if circleIconBtn(c, fmt.Sprintf("gsnd-b-%d", i), btnLbl, btnIcon, btnBg, btnFg, 36).Clicked() {
+									playBtn.Children(func() {
+										ui.Icon(c, btnIcon).FontSize(15).TextColor(fg)
+									})
+									if playBtn.Clicked() {
 										if isThis && (pst.Playing || pst.Loading) {
 											a.player.TogglePause()
 										} else {
@@ -715,12 +769,13 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 											})
 										}
 									}
+
 									ui.Column(c).Grow(1).Basis(0).Gap(2).Children(func() {
 										ui.Textf(c, "%s · %s", snd.Type, snd.Source).FontSize(14).FontWeight(500).SingleLine()
 										ui.Textf(c, "%s · %s", snd.Place, snd.Recordist).FontSize(12).TextColor(t.TextMuted).SingleLine()
 									})
 									if snd.Quality != "" && snd.Quality != "研究级鉴定" {
-										ui.Text(c, snd.Quality).FontSize(11.5).FontWeight(600).TextColor(t.TextMuted)
+										statusPill(c, snd.Quality, softPillColor(t), secondaryTextColor(t))
 									}
 								})
 							}
@@ -728,17 +783,15 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 					}
 				})
 
-				minimalDivider(c, t)
-
-				// 中文百科简介（纯留白排版，无多余边框卡片）
-				ui.Column(c).FillWidth().Gap(10).Selectable().Children(func() {
+				// 物种百科实体卡片
+				tactileCard(c, t).Padding(16).Gap(10).Selectable().Children(func() {
 					ui.Text(c, "物种简介").FontSize(16).FontWeight(600)
 					if media == nil && busy {
 						ui.Text(c, "正在加载中文维基百科简介…").FontSize(13).TextColor(t.TextMuted)
 					} else if media != nil && media.Wiki != nil && media.Wiki.Extract != "" {
 						ui.Text(c, media.Wiki.Extract).FontSize(15).LineHeight(1.75).TextColor(secondaryTextColor(t))
 					} else {
-						ui.Text(c, "中文维基百科暂未收录该鸟种的摘要说明。").FontSize(13.5).TextColor(t.TextMuted)
+						ui.Text(c, "中文维基百科暂未收录该鸟种的摘要说明。").FontSize(13).TextColor(t.TextMuted)
 					}
 
 					ui.Row(c).Gap(16).Wrap().Padding(4, 0, 0, 0).Children(func() {
@@ -752,7 +805,7 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 					})
 				})
 
-				if monochromeButton(c, "gd-cta-log", "记入观鸟日志并解锁", true, t).FillWidth().Height(48).Radius(24).Clicked() {
+				if tactilePrimaryBtn(c, "gd-cta-log", "记入观鸟日志并解锁", t).FillWidth().Height(48).Radius(24).Clicked() {
 					a.OpenNewJournalModal(tx.SpeciesCode, "")
 				}
 			})

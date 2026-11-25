@@ -12,6 +12,7 @@ import (
 	"github.com/Darastas/Birdview/internal/api"
 	"github.com/Darastas/Birdview/internal/model"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
 	"github.com/egoist/mygo/ui/netimage"
@@ -287,23 +288,22 @@ func (a *AppState) OpenExploreHotspot(h model.Hotspot) {
 
 func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Children(func() {
-		ui.Column(c).FillWidth().Padding(16, 20, 0, 20).Gap(10).Children(func() {
+		ui.Column(c).FillWidth().Padding(16, 18, 10, 18).Gap(12).Children(func() {
 			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "探索").FontSize(24).FontWeight(700).LetterSpacing(-0.4).Role(ui.RoleHeading).Level(1)
+				ui.Text(c, "探索").FontSize(26).FontWeight(600).LetterSpacing(-0.1).Role(ui.RoleHeading).Level(1)
 
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					if a.regPhotoBusy || a.regObsBusy || a.hsBusy {
 						ui.Spinner(c).Label("加载中")
 					}
-					locBtn := ui.Row(c.Key("exp-region-btn")).Height(32).PaddingX(12).Radius(16).
-						Background(t.Surface).Gap(5).AlignItems(ui.Center).
-						Role(ui.RoleButton).Label("切换探索地区")
-					if t.Dark {
-						locBtn.Border(1, t.Border)
-					}
+					locBtn := applySculptedSecondaryPillStyle(
+						ui.Row(c.Key("exp-region-btn")).Height(34).PaddingX(14).Radius(17).
+							Gap(5).AlignItems(ui.Center).Role(ui.RoleButton).Label("切换探索地区"),
+						t,
+					)
 					locBtn.Children(func() {
-						ui.Icon(c, iconMapPin).FontSize(12.5).TextColor(t.Text)
-						ui.Text(c, a.exploreRegionButtonText()+" ▾").FontSize(12.5).FontWeight(500).SingleLine()
+						ui.Icon(c, iconMapPin).FontSize(13).TextColor(opticalAccentColor(t))
+						ui.Text(c, a.exploreRegionButtonText()+" ▾").FontSize(13).FontWeight(500).SingleLine()
 					})
 					if locBtn.Clicked() {
 						a.regRegionTarget = "explore"
@@ -313,7 +313,7 @@ func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 				})
 			})
 
-			if underlineTabStrip(c, "exp-seg", &a.session.ExploreSubTab, t, "现场实拍", "近期目击", "珍稀记录", "观鸟热点") {
+			if tactileSegmentedControl(c, "exp-seg", &a.session.ExploreSubTab, t, "现场实拍", "近期目击", "珍稀记录", "观鸟热点") {
 				a.LoadExploreData()
 			}
 		})
@@ -323,7 +323,7 @@ func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 			a.LoadExploreData()
 		}
 		scroll.Children(func() {
-			ui.Column(c).FillWidth().Padding(16, 20, 28, 20).Gap(20).Children(func() {
+			ui.Column(c).FillWidth().Padding(6, 18, 106, 18).Gap(14).Children(func() {
 				switch a.session.ExploreSubTab {
 				case 0:
 					a.buildExplorePhotoFeed(c, t)
@@ -339,7 +339,7 @@ func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 
 func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 	if a.regPhotoErr != "" {
-		ui.Column(c).FillWidth().Padding(24, 0).AlignItems(ui.Center).Gap(12).Children(func() {
+		tactileCard(c, t).Padding(18).Gap(12).Children(func() {
 			ui.Text(c, a.regPhotoErr).FontSize(13).TextColor(t.Danger)
 			if filterPill(c, "fp-retry", "重新加载", false, t).Clicked() {
 				a.loadExploreFieldPhotos()
@@ -348,10 +348,12 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 		return
 	}
 	if len(a.regFieldPhotos) == 0 && !a.regPhotoBusy {
-		ui.Column(c).FillWidth().Padding(40, 12).Center().Gap(10).Children(func() {
-			ui.Icon(c, iconImage).FontSize(30).TextColor(t.TextMuted.Alpha(0.45))
+		tactileCard(c, t).Padding(32).Center().Gap(10).Children(func() {
+			tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
+				ui.Icon(c, iconImage).FontSize(22).TextColor(t.TextMuted)
+			})
 			ui.Text(c, "周边暂无带图现场实拍").FontSize(15).FontWeight(600)
-			ui.Text(c, "可下拉刷新或右上角切换其他省份/GPS定位").FontSize(12.5).TextColor(t.TextMuted)
+			ui.Text(c, "可下拉刷新或右上角切换其他省份/GPS定位").FontSize(12).TextColor(t.TextMuted)
 			if filterPill(c, "fp-load-btn", "立即获取", true, t).Clicked() {
 				a.loadExploreFieldPhotos()
 			}
@@ -359,39 +361,43 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 		return
 	}
 
-	ui.Column(c).FillWidth().Gap(24).Children(func() {
+	ui.Column(c).FillWidth().Gap(16).Children(func() {
 		for i, item := range a.regFieldPhotos {
 			obsItem := item
-			card := ui.Column(c.Key(fmt.Sprintf("fpcard-%d-%d", obsItem.ID, i))).FillWidth().Gap(10).
+			card := tactileCard(c, t).Key(fmt.Sprintf("fpcard-%d-%d", obsItem.ID, i)).Clip().
 				Role(ui.RoleButton).Label(obsItem.ComName + " 现场实拍")
 			card.Children(func() {
-				// 当次观测者真实拍摄的现场照片（无外框，纯净摄影画幅）
-				ui.Box(c).FillWidth().Height(232).Radius(16).Clip().Background(t.Surface).Children(func() {
+				ui.Box(c).FillWidth().Height(228).Background(softPillColor(t)).Children(func() {
 					netimage.Image(c, obsItem.Photos[0].URL, netimage.Options{
 						MaxSide:     960,
 						Fit:         ui.Cover,
-						Placeholder: t.Surface,
+						Placeholder: softPillColor(t),
 					}).Fill()
 
-					ui.Row(c).Absolute().Right(10).Top(10).Gap(6).Children(func() {
+					ui.Row(c).Absolute().Right(12).Top(12).Gap(6).Children(func() {
 						if len(obsItem.Sounds) > 0 {
-							ui.Text(c, "录音").FontSize(11).FontWeight(500).Padding(3, 8).Radius(999).
-								Background(ui.RGBA(0, 0, 0, 0.45)).TextColor(ui.RGB(255, 255, 255))
+							ui.Text(c, "录音").FontSize(11).FontWeight(500).Padding(4, 9).Radius(999).
+								Material(glass.Glass{Style: glass.Clear, Tint: ui.RGBA(0, 0, 0, 0.28)}).
+								Border(1, ui.RGBA(255, 255, 255, 0.25)).
+								TextColor(ui.RGB(255, 255, 255))
 						}
 						if len(obsItem.Photos) > 1 {
-							ui.Textf(c, "1/%d", len(obsItem.Photos)).FontSize(11).FontWeight(500).Padding(3, 8).Radius(999).
-								Background(ui.RGBA(0, 0, 0, 0.45)).TextColor(ui.RGB(255, 255, 255))
+							ui.Textf(c, "1/%d", len(obsItem.Photos)).FontSize(11).FontWeight(500).Padding(4, 9).Radius(999).
+								Material(glass.Glass{Style: glass.Clear, Tint: ui.RGBA(0, 0, 0, 0.28)}).
+								Border(1, ui.RGBA(255, 255, 255, 0.25)).
+								FontFeatures("tnum").
+								TextColor(ui.RGB(255, 255, 255))
 						}
 					})
 				})
 
-				ui.Column(c).FillWidth().Padding(0, 2).Gap(3).Children(func() {
+				ui.Column(c).FillWidth().Padding(14, 16).Gap(4).Children(func() {
 					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Baseline).Gap(8).Children(func() {
-						ui.Text(c, obsItem.ComName).FontSize(16.5).FontWeight(600).SingleLine().Grow(1)
+						ui.Text(c, obsItem.ComName).FontSize(16).FontWeight(600).SingleLine().Grow(1)
 						ui.Text(c, model.FormatObsTime(obsItem.ObservedOn)).FontSize(12).TextColor(t.TextMuted).SingleLine()
 					})
 					ui.Textf(c, "%s · 拍摄者：%s", fallbackText(obsItem.PlaceGuess, "野外现场"), obsItem.Observer).
-						FontSize(12.5).TextColor(t.TextMuted).SingleLine()
+						FontSize(12).TextColor(secondaryTextColor(t)).SingleLine()
 				})
 			})
 			if card.Clicked() {
@@ -405,15 +411,17 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 
 func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
 	if a.regStat != nil {
-		ui.Row(c).FillWidth().Padding(14, 10).Radius(14).Background(t.Surface).Children(func() {
-			metricMiniCard(c, t, "昨日清单", fmt.Sprintf("%d", a.regStat.NumChecklists))
-			metricMiniCard(c, t, "目击鸟种", fmt.Sprintf("%d", a.regStat.NumSpecies))
-			metricMiniCard(c, t, "贡献人数", fmt.Sprintf("%d", a.regStat.NumContributors))
+		tactileCard(c, t).Padding(14, 8).Children(func() {
+			ui.Row(c).FillWidth().Dividers(1, subtleHairlineColor(t)).Children(func() {
+				metricMiniCard(c, t, "昨日清单", fmt.Sprintf("%d", a.regStat.NumChecklists))
+				metricMiniCard(c, t, "目击鸟种", fmt.Sprintf("%d", a.regStat.NumSpecies))
+				metricMiniCard(c, t, "贡献人数", fmt.Sprintf("%d", a.regStat.NumContributors))
+			})
 		})
 	}
 
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-		ui.Row(c).Gap(6).Children(func() {
+		ui.Row(c).Gap(8).Children(func() {
 			for _, label := range []string{"7天", "14天", "30天"} {
 				l := label
 				if filterPill(c, "back-"+l, l, a.regBackLabel == l, t).Clicked() {
@@ -428,7 +436,7 @@ func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
 	})
 
 	if a.regObsErr != "" {
-		ui.Column(c).FillWidth().Padding(20, 0).Gap(10).Children(func() {
+		tactileCard(c, t).Padding(18).Gap(12).Children(func() {
 			ui.Text(c, a.regObsErr).FontSize(13).TextColor(t.Danger)
 			if a.store.LoadEbirdKey() == "" {
 				if filterPill(c, "obs-goto-set", "前往设置 Key", true, t).Clicked() {
@@ -440,8 +448,10 @@ func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
 	}
 
 	if len(a.regObsList) == 0 && !a.regObsBusy {
-		ui.Column(c).FillWidth().Padding(36, 12).Center().Gap(8).Children(func() {
-			ui.Icon(c, iconGlobe).FontSize(30).TextColor(t.TextMuted.Alpha(0.45))
+		tactileCard(c, t).Padding(32).Center().Gap(10).Children(func() {
+			tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
+				ui.Icon(c, iconGlobe).FontSize(22).TextColor(t.TextMuted)
+			})
 			ui.Text(c, "近期暂无公开观测记录").FontSize(15).FontWeight(600)
 			if filterPill(c, "obs-load-now", "刷新尝试", false, t).Clicked() {
 				a.LoadExploreData()
@@ -450,21 +460,21 @@ func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
 		return
 	}
 
-	ui.Column(c).FillWidth().Dividers(1, t.Border).Children(func() {
+	tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
 		for i, o := range a.regObsList {
 			obs := o
 			row := ui.Row(c.Key(fmt.Sprintf("ebobs-%s-%d", obs.SubID, i))).
-				FillWidth().Padding(13, 0).Gap(12).AlignItems(ui.Center).
+				FillWidth().Padding(13, 16).Gap(12).AlignItems(ui.Center).
 				Role(ui.RoleButton).Label(obs.ComName)
 			row.Children(func() {
 				ui.Column(c).Grow(1).Basis(0).Gap(3).Children(func() {
 					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, obs.ComName).FontSize(15.5).FontWeight(600).SingleLine()
+						ui.Text(c, obs.ComName).FontSize(15).FontWeight(500).SingleLine()
 						if obs.HasRichMedia {
-							statusPill(c, "含媒体", t.Surface, secondaryTextColor(t))
+							statusPill(c, "含媒体", softPillColor(t), opticalAccentColor(t))
 						}
 					})
-					ui.Text(c, fallbackText(obs.LocName, "未命名观鸟点")).FontSize(12.5).TextColor(t.TextMuted).SingleLine()
+					ui.Text(c, fallbackText(obs.LocName, "未命名观鸟点")).FontSize(12).TextColor(t.TextMuted).SingleLine()
 				})
 
 				ui.Column(c).AlignItems(ui.End).Gap(3).Shrink(0).Children(func() {
@@ -472,13 +482,8 @@ func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
 					if obs.HowMany > 0 {
 						cntText = fmt.Sprintf("%d 只", obs.HowMany)
 					}
-					ui.Text(c, cntText).FontSize(14).FontWeight(600).FontFeatures("tnum")
-					ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
-						if obs.ObsValid {
-							ui.Box(c).Size(6, 6).Radius(3).Background(t.Success)
-						}
-						ui.Text(c, model.FormatObsTime(obs.ObsDt)).FontSize(11.5).TextColor(t.TextMuted)
-					})
+					ui.Text(c, cntText).FontSize(14).FontWeight(500).FontFeatures("tnum")
+					ui.Text(c, model.FormatObsTime(obs.ObsDt)).FontSize(12).TextColor(t.TextMuted)
 				})
 			})
 			if row.Clicked() {
@@ -494,7 +499,7 @@ func (a *AppState) buildExploreHotspotsFeed(c *ui.Context, t *ui.Theme) {
 	}
 
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-		ui.Row(c).Gap(6).Children(func() {
+		ui.Row(c).Gap(8).Children(func() {
 			if filterPill(c, "hsort-cnt", "鸟种最多", a.hsSortMode == 0, t).Clicked() {
 				a.hsSortMode = 0
 				a.applyHotspotFilterAndSort()
@@ -510,7 +515,7 @@ func (a *AppState) buildExploreHotspotsFeed(c *ui.Context, t *ui.Theme) {
 	})
 
 	if a.hsErr != "" {
-		ui.Column(c).FillWidth().Padding(20, 0).Gap(10).Children(func() {
+		tactileCard(c, t).Padding(18).Gap(12).Children(func() {
 			ui.Text(c, a.hsErr).FontSize(13).TextColor(t.Danger)
 			if a.store.LoadEbirdKey() == "" {
 				if filterPill(c, "hs-goto-set", "前往设置 Key", true, t).Clicked() {
@@ -522,8 +527,10 @@ func (a *AppState) buildExploreHotspotsFeed(c *ui.Context, t *ui.Theme) {
 	}
 
 	if len(a.hsFiltered) == 0 && !a.hsBusy {
-		ui.Column(c).FillWidth().Padding(36, 12).Center().Gap(8).Children(func() {
-			ui.Icon(c, iconMapPin).FontSize(30).TextColor(t.TextMuted.Alpha(0.45))
+		tactileCard(c, t).Padding(32).Center().Gap(10).Children(func() {
+			tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
+				ui.Icon(c, iconMapPin).FontSize(22).TextColor(t.TextMuted)
+			})
 			ui.Text(c, "暂无符合条件的观鸟热点").FontSize(15).FontWeight(600)
 			if filterPill(c, "hs-load-now", "刷新尝试", false, t).Clicked() {
 				a.loadExploreHotspots()
@@ -532,11 +539,11 @@ func (a *AppState) buildExploreHotspotsFeed(c *ui.Context, t *ui.Theme) {
 		return
 	}
 
-	ui.Column(c).FillWidth().Dividers(1, t.Border).Children(func() {
+	tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
 		for _, h := range a.hsFiltered {
 			spot := h
 			row := ui.Row(c.Key("hspot-"+spot.LocID)).
-				FillWidth().Padding(14, 0).Gap(12).AlignItems(ui.Center).
+				FillWidth().Padding(13, 16).Gap(12).AlignItems(ui.Center).
 				Role(ui.RoleButton).Label(spot.LocName)
 			row.Children(func() {
 				ui.Column(c).Grow(1).Basis(0).Gap(3).Children(func() {
@@ -544,9 +551,12 @@ func (a *AppState) buildExploreHotspotsFeed(c *ui.Context, t *ui.Theme) {
 					ui.Textf(c, "最近活跃 · %s", model.FormatObsTime(spot.LatestObsDt)).
 						FontSize(12).TextColor(t.TextMuted).SingleLine()
 				})
-				ui.Row(c).Gap(3).AlignItems(ui.Baseline).Shrink(0).Children(func() {
-					ui.Textf(c, "%d", spot.NumSpeciesAllTime).FontSize(18).FontWeight(600).FontFeatures("tnum")
-					ui.Text(c, "种").FontSize(11.5).TextColor(t.TextMuted)
+				badge := ui.Row(c).Height(30).PaddingX(10).Radius(10).Background(softPillColor(t)).
+					Border(1, subtleHairlineColor(t)).
+					AlignItems(ui.Center).Gap(3).Shrink(0)
+				badge.Children(func() {
+					ui.Textf(c, "%d", spot.NumSpeciesAllTime).FontSize(15).FontWeight(600).FontFeatures("tnum")
+					ui.Text(c, "种").FontSize(11).TextColor(t.TextMuted)
 				})
 			})
 			if row.Clicked() {
@@ -569,12 +579,16 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 	}
 
 	top, _, _, _ := c.SafeArea()
-	topBtnY := max(float32(12), top+6)
+	topBtnY := max(float32(14), top+6)
+	sheetRim := ui.RGBA(255, 255, 255, 0.85)
+	if t.Dark {
+		sheetRim = ui.RGBA(255, 255, 255, 0.14)
+	}
 
-	ui.Scroll(c.Key("ep-scroll")).Fill().Background(t.Background).Children(func() {
-		ui.Column(c).FillWidth().Padding(0, 0, 32, 0).Gap(0).Children(func() {
+	ui.Scroll(c.Key("ep-scroll")).Fill().Children(func() {
+		ui.Column(c).FillWidth().Padding(0, 0, 44, 0).Gap(0).Children(func() {
 			count := len(item.Photos)
-			ui.Box(c).FillWidth().Height(300).Background(t.Surface).Children(func() {
+			ui.Box(c).FillWidth().Height(330).Background(t.Surface).Children(func() {
 				mobile.PageView(c, &a.regPhotoPager, count, func(i int) {
 					slide := ui.Box(c.Key(fmt.Sprintf("fpslide-%d", i))).Fill().
 						Role(ui.RoleButton).Label("点击放大查看实拍图")
@@ -590,38 +604,46 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 					}
 				}).Fill()
 
-				ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(72).LinearGradient(ui.LinearGradient{
-					From:  ui.RGBA(0, 0, 0, 0.36),
+				ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(76).PassThrough().LinearGradient(ui.LinearGradient{
+					From:  ui.RGBA(0, 0, 0, 0.34),
 					To:    ui.RGBA(0, 0, 0, 0),
 					Angle: 180,
 				})
-				if glassCircleBtn(c, "ep-back-btn", "返回", iconBack, 36).
+				if liquidGlassCircleBtn(c, "ep-back-btn", "返回", iconBack, 38).
 					Absolute().Left(16).Top(topBtnY).Clicked() {
 					a.goBack()
 				}
 				if count > 0 {
 					ui.Textf(c, "%d / %d", a.regPhotoPager.Page+1, count).
-						Absolute().Left(18).Bottom(14).Padding(3, 8).Radius(999).
-						FontSize(11.5).FontWeight(600).FontFeatures("tnum").
-						Background(ui.RGBA(0, 0, 0, 0.48)).TextColor(ui.RGB(255, 255, 255))
+						Absolute().Left(18).Bottom(38).Padding(3, 10).Radius(999).
+						Material(glass.Glass{Style: glass.Clear, Tint: ui.RGBA(0, 0, 0, 0.26)}).
+						Border(1, ui.RGBA(255, 255, 255, 0.24)).
+						FontSize(12).FontWeight(500).FontFeatures("tnum").
+						TextColor(ui.RGB(255, 255, 255))
 					if count > 1 {
-						ui.Box(c).Absolute().Right(16).Bottom(14).Children(func() {
+						ui.Box(c).Absolute().Right(16).Bottom(40).Children(func() {
 							mobile.PageDots(c, a.regPhotoPager.Page, count)
 						})
 					}
 				}
 			})
 
-			ui.Column(c).FillWidth().Padding(20, 20, 0, 20).Gap(18).Children(func() {
-				ui.Column(c).FillWidth().Gap(5).Children(func() {
+			applyCanvasBackground(
+				ui.Column(c).FillWidth().Margin(-26, 0, 0, 0).Radius(26, 26, 0, 0).
+					BorderWidth(1, 0, 0, 0).BorderColor(sheetRim).
+					Shadow(0, -10, 28, 0, ui.RGBA(0, 0, 0, 0.16)).
+					Padding(22, 18, 0, 18).Gap(16),
+				t,
+			).Children(func() {
+				tactileCard(c, t).Padding(16).Gap(8).Children(func() {
 					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(8).Children(func() {
-						ui.Text(c, item.ComName).FontSize(24).FontWeight(700).LetterSpacing(-0.3).Grow(1)
-						statusPill(c, model.QualityGradeZh(item.QualityGrade), t.Surface, secondaryTextColor(t))
+						ui.Text(c, item.ComName).FontSize(22).FontWeight(600).LetterSpacing(-0.1).Grow(1)
+						statusPill(c, model.QualityGradeZh(item.QualityGrade), softPillColor(t), opticalAccentColor(t))
 					})
-					ui.Text(c, item.SciName).FontSize(14).TextColor(t.TextMuted)
+					ui.Text(c, item.SciName).FontSize(14).Italic().TextColor(t.TextMuted)
 					ui.Textf(c, "%s · %s", model.FormatObsTime(item.ObservedOn), fallbackText(item.PlaceGuess, "野外地点")).
-						FontSize(13.5).TextColor(secondaryTextColor(t))
-					ui.Textf(c, "现场拍摄：%s", item.Observer).FontSize(12.5).TextColor(t.TextMuted)
+						FontSize(13).TextColor(secondaryTextColor(t))
+					ui.Textf(c, "现场拍摄：%s", item.Observer).FontSize(12).TextColor(t.TextMuted)
 					if item.ObsURL != "" {
 						ui.Box(c).Padding(4, 0, 0, 0).Children(func() {
 							ui.Link(c, "打开 iNaturalist 现场原记录 ↗", item.ObsURL)
@@ -630,24 +652,31 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 				})
 
 				if len(item.Sounds) > 0 {
-					minimalDivider(c, t)
-					ui.Column(c).FillWidth().Gap(8).Children(func() {
+					tactileCard(c, t).Padding(16).Gap(10).Children(func() {
 						ui.Text(c, "本次目击现场录音").FontSize(16).FontWeight(600)
 						st := a.player.Status()
-						ui.Column(c).FillWidth().Dividers(1, t.Border).Children(func() {
+						ui.Column(c).FillWidth().Dividers(1, subtleHairlineColor(t)).Children(func() {
 							for i, snd := range item.Sounds {
 								snd := snd
 								isThis := st.SourceKey == snd.URL
 								ui.Row(c.Key(fmt.Sprintf("fps-%d", i))).FillWidth().Padding(10, 0).Gap(12).AlignItems(ui.Center).Children(func() {
 									ic := iconPlay
-									bg := t.Surface
+									playBtn := ui.Box(c.Key(fmt.Sprintf("fpsb-%d", i))).Size(38, 38).Radius(19).Center().Shrink(0).
+										Role(ui.RoleButton).Label("播放现场录音")
 									fg := t.Text
 									if isThis && st.Playing {
 										ic = iconPause
-										bg = t.Accent
-										fg = t.AccentText
+										fg = ui.RGB(255, 255, 255)
+										c1, c2 := opticalAccentColors(t)
+										playBtn.LinearGradient(ui.LinearGradient{From: c1, To: c2, Angle: 180}).
+											Shadow(0, 4, 12, 0, c1.Alpha(0.35))
+									} else {
+										applySculptedSecondaryPillStyle(playBtn, t)
 									}
-									if circleIconBtn(c, fmt.Sprintf("fpsb-%d", i), "播放现场录音", ic, bg, fg, 36).Clicked() {
+									playBtn.Children(func() {
+										ui.Icon(c, ic).FontSize(15).TextColor(fg)
+									})
+									if playBtn.Clicked() {
 										if isThis && (st.Playing || st.Loading) {
 											a.player.TogglePause()
 										} else {
@@ -704,41 +733,38 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 		}
 	}
 
-	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		ui.Row(c).FillWidth().Padding(12, 20, 10, 20).Gap(10).AlignItems(ui.Center).Children(func() {
-			if circleIconBtn(c, "ec-back-btn", "返回", iconBack, t.Surface, t.Text, 36).Clicked() {
+	ui.Column(c).Fill().Children(func() {
+		ui.Row(c).FillWidth().Padding(14, 18, 10, 18).Gap(10).AlignItems(ui.Center).Children(func() {
+			if tactileIconBtn(c, "ec-back-btn", "返回", iconBack, 36, t).Clicked() {
 				a.goBack()
 			}
-			ui.Text(c, "观鸟清单").FontSize(16.5).FontWeight(600).SingleLine().Grow(1)
+			ui.Text(c, "观鸟清单").FontSize(16).FontWeight(600).SingleLine().Grow(1)
 			if filterPill(c, "ec-goto-guide", "看图鉴", false, t).Clicked() {
 				a.OpenSpeciesInGuide(obs.SpeciesCode)
 			}
 		})
-		minimalDivider(c, t)
 
 		ui.Scroll(c.Key("ec-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
-			ui.Column(c).FillWidth().Padding(18, 20, 32, 20).Gap(20).Children(func() {
-				ui.Column(c).FillWidth().Gap(5).Children(func() {
-					ui.Text(c, obs.ComName).FontSize(24).FontWeight(700).LetterSpacing(-0.3)
-					ui.Text(c, obs.SciName).FontSize(14).TextColor(t.TextMuted)
+			ui.Column(c).FillWidth().Padding(6, 18, 44, 18).Gap(14).Children(func() {
+				tactileCard(c, t).Padding(16).Gap(8).Children(func() {
+					ui.Text(c, obs.ComName).FontSize(22).FontWeight(600).LetterSpacing(-0.1)
+					ui.Text(c, obs.SciName).FontSize(14).Italic().TextColor(t.TextMuted)
 					ui.Row(c).Gap(6).Wrap().Padding(4, 0, 0, 0).Children(func() {
-						statusPill(c, model.FormatObsTime(obs.ObsDt), t.Surface, secondaryTextColor(t))
-						statusPill(c, fallbackText(obs.LocName, "未命名地点"), t.Surface, secondaryTextColor(t))
+						statusPill(c, model.FormatObsTime(obs.ObsDt), softPillColor(t), secondaryTextColor(t))
+						statusPill(c, fallbackText(obs.LocName, "未命名地点"), softPillColor(t), secondaryTextColor(t))
 						if obs.HowMany > 0 {
-							statusPill(c, fmt.Sprintf("%d 只", obs.HowMany), t.Surface, t.Text)
+							statusPill(c, fmt.Sprintf("%d 只", obs.HowMany), softPillColor(t), t.Text)
 						}
 						if obs.UserDisplayName != "" {
-							statusPill(c, obs.UserDisplayName, t.Surface, t.TextMuted)
+							statusPill(c, obs.UserDisplayName, softPillColor(t), t.TextMuted)
 						}
 					})
 				})
 
-				minimalDivider(c, t)
-
 				// 严格隔离卡片：绝不在此处加载图鉴通用物种照
-				ui.Column(c).FillWidth().Padding(14).Radius(14).Background(t.Surface).Gap(8).Children(func() {
+				tactileCard(c, t).Padding(16).Gap(10).Children(func() {
 					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, "本次观测现场媒体（非图鉴标准图）").FontSize(14).FontWeight(600)
+						ui.Text(c, "本次观测现场媒体（非图鉴标准图）").FontSize(15).FontWeight(600)
 						if clBusy {
 							ui.Spinner(c).Label("获取清单")
 						}
@@ -752,11 +778,11 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 
 					if photoCnt > 0 || audioCnt > 0 || obs.HasRichMedia {
 						msg := fmt.Sprintf("观测者已为清单 %s 上传现场媒体：%d 张照片 · %d 段录音。", obs.SubID, photoCnt, audioCnt)
-						ui.Text(c, msg).FontSize(13.5)
+						ui.Text(c, msg).FontSize(14)
 						ui.Text(c, "eBird API v2 仅返回现场媒体计数而不直接暴露图片地址，请点击下方按钮打开原清单查看本次实拍图（不与图鉴通用图混用）。").
-							FontSize(12.5).TextColor(t.TextMuted).LineHeight(1.5)
+							FontSize(12).TextColor(t.TextMuted).LineHeight(1.5)
 						if obs.SubID != "" {
-							if monochromeButton(c, "ec-open-ebird", "打开 eBird 清单原页 ↗", true, t).FillWidth().Clicked() {
+							if tactilePrimaryBtn(c, "ec-open-ebird", "打开 eBird 清单原页 ↗", t).FillWidth().Clicked() {
 								_ = mygo.Shell.OpenExternal("https://ebird.org/checklist/" + obs.SubID)
 							}
 						}
@@ -766,35 +792,35 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 					}
 				})
 
-				ui.Column(c).FillWidth().Gap(10).Selectable().Children(func() {
-					ui.Text(c, "清单上下文").FontSize(15.5).FontWeight(600)
+				tactileCard(c, t).Padding(16).Gap(10).Selectable().Children(func() {
+					ui.Text(c, "清单上下文").FontSize(16).FontWeight(600)
 					if checklist == nil {
 						ui.Text(c, "暂无该清单详细信息。").FontSize(13).TextColor(t.TextMuted)
 					} else {
 						ui.Row(c).Gap(6).Wrap().Children(func() {
 							if checklist.UserDisplayName != "" {
-								statusPill(c, "作者："+checklist.UserDisplayName, t.Surface, secondaryTextColor(t))
+								statusPill(c, "作者："+checklist.UserDisplayName, softPillColor(t), secondaryTextColor(t))
 							}
 							if checklist.DurationHrs > 0 {
-								statusPill(c, fmt.Sprintf("%.1f 小时", checklist.DurationHrs), t.Surface, secondaryTextColor(t))
+								statusPill(c, fmt.Sprintf("%.1f 小时", checklist.DurationHrs), softPillColor(t), secondaryTextColor(t))
 							}
 							if checklist.EffortDistanceKm > 0 {
-								statusPill(c, fmt.Sprintf("%.2f km", checklist.EffortDistanceKm), t.Surface, secondaryTextColor(t))
+								statusPill(c, fmt.Sprintf("%.2f km", checklist.EffortDistanceKm), softPillColor(t), secondaryTextColor(t))
 							}
-							statusPill(c, fmt.Sprintf("共 %d 种", checklist.NumSpecies), t.Surface, t.Text)
+							statusPill(c, fmt.Sprintf("共 %d 种", checklist.NumSpecies), softPillColor(t), t.Text)
 						})
 
 						if matchedItem != nil && strings.TrimSpace(matchedItem.Comments) != "" {
-							ui.Column(c).FillWidth().Padding(12).Radius(12).Background(t.Surface).Gap(4).Children(func() {
-								ui.Text(c, "现场记录备注").FontSize(12).FontWeight(600).TextColor(t.TextMuted)
-								ui.Text(c, matchedItem.Comments).FontSize(13.5).LineHeight(1.5)
+							tactileRecessedStyle(ui.Column(c).FillWidth().Padding(12).Gap(4), t, 12).Children(func() {
+								ui.Text(c, "现场记录备注").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
+								ui.Text(c, matchedItem.Comments).FontSize(14).LineHeight(1.5)
 							})
 						}
 
 						if len(checklist.Obs) > 0 {
-							ui.Text(c, "同清单伴生鸟种").FontSize(13).FontWeight(600).TextColor(t.TextMuted)
+							ui.Text(c, "同清单伴生鸟种").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
 							limit := min(20, len(checklist.Obs))
-							ui.Column(c).FillWidth().Dividers(1, t.Border).Children(func() {
+							ui.Column(c).FillWidth().Dividers(1, subtleHairlineColor(t)).Children(func() {
 								for i := 0; i < limit; i++ {
 									co := checklist.Obs[i]
 									name := co.SpeciesCode
@@ -802,8 +828,8 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 										name = tx.ComName
 									}
 									ui.Row(c.Key(fmt.Sprintf("ec-co-%d", i))).FillWidth().Justify(ui.SpaceBetween).Padding(9, 0).Children(func() {
-										ui.Text(c, name).FontSize(13.5)
-										ui.Text(c, fallbackText(co.HowManyStr, "在场")).FontSize(12.5).TextColor(t.TextMuted).FontFeatures("tnum")
+										ui.Text(c, name).FontSize(14)
+										ui.Text(c, fallbackText(co.HowManyStr, "在场")).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
 									})
 								}
 							})
@@ -811,7 +837,7 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 					}
 				})
 
-				if monochromeButton(c, "ec-add-journal", "记入观鸟日志", true, t).FillWidth().Height(48).Radius(24).Clicked() {
+				if tactilePrimaryBtn(c, "ec-add-journal", "记入观鸟日志", t).FillWidth().Height(48).Radius(24).Clicked() {
 					a.OpenNewJournalModal(obs.SpeciesCode, obs.LocName)
 				}
 			})
@@ -843,25 +869,24 @@ func (a *AppState) viewExploreHotspotDetail(c *ui.Context, t *ui.Theme, locID st
 	obsList := a.hsObsMap[spot.LocID]
 	busy := a.hsObsBusy[spot.LocID]
 
-	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		ui.Row(c).FillWidth().Padding(12, 20, 10, 20).Gap(10).AlignItems(ui.Center).Children(func() {
-			if circleIconBtn(c, "es-back-btn", "返回", iconBack, t.Surface, t.Text, 36).Clicked() {
+	ui.Column(c).Fill().Children(func() {
+		ui.Row(c).FillWidth().Padding(14, 18, 10, 18).Gap(10).AlignItems(ui.Center).Children(func() {
+			if tactileIconBtn(c, "es-back-btn", "返回", iconBack, 36, t).Clicked() {
 				a.goBack()
 			}
-			ui.Text(c, "观鸟热点").FontSize(16.5).FontWeight(600).SingleLine().Grow(1)
+			ui.Text(c, "观鸟热点").FontSize(16).FontWeight(600).SingleLine().Grow(1)
 		})
-		minimalDivider(c, t)
 
 		ui.Scroll(c.Key("es-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
-			ui.Column(c).FillWidth().Padding(18, 20, 32, 20).Gap(20).Children(func() {
-				ui.Column(c).FillWidth().Gap(8).Children(func() {
-					ui.Text(c, spot.LocName).FontSize(22).FontWeight(700).LetterSpacing(-0.3)
+			ui.Column(c).FillWidth().Padding(6, 18, 44, 18).Gap(14).Children(func() {
+				tactileCard(c, t).Padding(16).Gap(10).Children(func() {
+					ui.Text(c, spot.LocName).FontSize(22).FontWeight(600).LetterSpacing(-0.1)
 					ui.Textf(c, "累计 %d 种 · 最近活跃 %s · %.4f, %.4f",
 						spot.NumSpeciesAllTime, model.FormatObsTime(spot.LatestObsDt), spot.Lat, spot.Lng).
-						FontSize(12.5).TextColor(t.TextMuted)
+						FontSize(12).TextColor(t.TextMuted)
 
-					ui.Row(c).FillWidth().Gap(10).Padding(6, 0, 0, 0).Children(func() {
-						if monochromeButton(c, "hs-new-log", "在此处写日志", true, t).Grow(1).Height(42).Radius(21).Clicked() {
+					ui.Row(c).FillWidth().Gap(10).Padding(4, 0, 0, 0).Children(func() {
+						if tactilePrimaryBtn(c, "hs-new-log", "在此处写日志", t).Grow(1).Height(42).Radius(21).Clicked() {
 							a.OpenNewJournalModal("", spot.LocName)
 						}
 						if monochromeButton(c, "hs-open-web", "网页查看 ↗", false, t).Height(42).Radius(21).Clicked() {
@@ -870,25 +895,23 @@ func (a *AppState) viewExploreHotspotDetail(c *ui.Context, t *ui.Theme, locID st
 					})
 				})
 
-				minimalDivider(c, t)
-
-				ui.Column(c).FillWidth().Gap(8).Children(func() {
+				tactileCard(c, t).Padding(16).Gap(10).Children(func() {
 					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, "近 30 天目击鸟种").FontSize(16).FontWeight(600)
 						if busy {
 							ui.Spinner(c).Label("加载鸟种")
 						} else {
-							ui.Textf(c, "%d 条", len(obsList)).FontSize(12.5).TextColor(t.TextMuted).FontFeatures("tnum")
+							ui.Textf(c, "%d 条", len(obsList)).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
 						}
 					})
 
 					if len(obsList) == 0 && !busy {
 						ui.Text(c, "该热点近 30 天暂无公开目击记录。").FontSize(13).TextColor(t.TextMuted)
 					} else {
-						ui.Column(c).FillWidth().Dividers(1, t.Border).Children(func() {
+						ui.Column(c).FillWidth().Dividers(1, subtleHairlineColor(t)).Children(func() {
 							for i, o := range obsList {
 								o := o
-								ui.Row(c.Key(fmt.Sprintf("esobs-%d", i))).FillWidth().Padding(11, 0).Gap(10).AlignItems(ui.Center).Children(func() {
+								ui.Row(c.Key(fmt.Sprintf("esobs-%d", i))).FillWidth().Padding(10, 0).Gap(10).AlignItems(ui.Center).Children(func() {
 									ui.Column(c).Grow(1).Basis(0).Gap(2).Children(func() {
 										ui.Text(c, o.ComName).FontSize(15).FontWeight(500).SingleLine()
 										cnt := "在场"
@@ -922,23 +945,26 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 	}, func() {
 		ui.Column(c).Fill().Children(func() {
 			ui.Row(c).FillWidth().Padding(8, 20, 14, 20).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "选择观鸟地区").FontSize(16.5).FontWeight(600)
+				ui.Text(c, "选择观鸟地区").FontSize(16).FontWeight(600)
 				if filterPill(c, "rp-close", "关闭", false, t).Clicked() {
 					a.regRegionSheetOpen = false
 				}
 			})
 			minimalDivider(c, t)
 
-			ui.Column(c).Padding(14, 20, 10, 20).Gap(10).Children(func() {
+			ui.Column(c).Padding(14, 18, 10, 18).Gap(10).Children(func() {
 				if a.regRegionTarget == "explore" {
-					gpsBtn := ui.Row(c.Key("rp-gps")).FillWidth().Height(44).PaddingX(14).Radius(12).
-						Background(t.Surface).Gap(10).AlignItems(ui.Center).
-						Role(ui.RoleButton).Label("使用手机 GPS 定位周边")
+					gpsBtn := applySculptedSecondaryPillStyle(
+						ui.Row(c.Key("rp-gps")).FillWidth().Height(44).PaddingX(14).Radius(14).
+							Gap(10).AlignItems(ui.Center).
+							Role(ui.RoleButton).Label("使用手机 GPS 定位周边"),
+						t,
+					)
 					gpsBtn.Children(func() {
 						if a.regGPSBusy {
 							ui.Spinner(c).Label("定位中")
 						} else {
-							ui.Icon(c, iconLocate).FontSize(17).TextColor(t.Text)
+							ui.Icon(c, iconLocate).FontSize(17).TextColor(opticalAccentColor(t))
 						}
 						ui.Text(c, "使用手机 GPS 定位周边").FontSize(14).FontWeight(500).TextColor(t.Text).Grow(1)
 					})
@@ -952,7 +978,7 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 					ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 						in := minimalTextInput(c, "rp-custom", &a.regCustomCode,
 							"地区码或纬度,经度（如 US-NY / 39.9,116.4）", "自定义地区", t).Grow(1)
-						if in.Submitted() || filterPill(c, "rp-go", "查询", true, t).Height(38).Radius(12).Clicked() {
+						if in.Submitted() || filterPill(c, "rp-go", "查询", true, t).Height(40).Radius(12).Clicked() {
 							a.regRegionSheetOpen = false
 							a.LoadExploreData()
 						}
@@ -962,9 +988,9 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 				minimalSearchBar(c, "rp-search", &a.regRegionQuery, "搜索省市名称或区号", "搜索地区", t)
 			})
 
-			ui.Scroll(c.Key("rp-list")).Grow(1).Basis(0).FillWidth().Padding(0, 20, 28, 20).Children(func() {
+			ui.Scroll(c.Key("rp-list")).Grow(1).Basis(0).FillWidth().Padding(4, 18, 28, 18).Children(func() {
 				q := strings.ToLower(strings.TrimSpace(a.regRegionQuery))
-				ui.Column(c).FillWidth().Dividers(1, t.Border).Children(func() {
+				tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
 					for _, reg := range api.ChinaRegions {
 						r := reg
 						if q != "" && !strings.Contains(strings.ToLower(r.Name), q) && !strings.Contains(strings.ToLower(r.Code), q) {
@@ -976,17 +1002,17 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 						} else {
 							active = a.regCustomCode == "" && a.regRegionLabel == r.Name
 						}
-						row := ui.Row(c.Key("regopt-"+r.Code)).FillWidth().Padding(13, 2).
+						row := ui.Row(c.Key("regopt-"+r.Code)).FillWidth().Padding(13, 16).
 							Justify(ui.SpaceBetween).AlignItems(ui.Center).
 							Role(ui.RoleButton).Label(r.Name)
 						row.Children(func() {
 							weight := 400
 							if active {
-								weight = 600
+								weight = 500
 							}
-							ui.Text(c, r.Name).FontSize(14.5).FontWeight(weight)
+							ui.Text(c, r.Name).FontSize(15).FontWeight(weight)
 							if active {
-								ui.Icon(c, iconCheck).FontSize(16).TextColor(t.Text)
+								ui.Icon(c, iconCheck).FontSize(16).TextColor(opticalAccentColor(t))
 							}
 						})
 						if row.Clicked() {
@@ -1009,7 +1035,7 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 
 func metricMiniCard(c *ui.Context, t *ui.Theme, label, val string) {
 	ui.Column(c).Grow(1).Basis(0).AlignItems(ui.Center).Gap(2).Children(func() {
-		ui.Text(c, val).FontSize(18).FontWeight(700).FontFeatures("tnum")
-		ui.Text(c, label).FontSize(11).TextColor(t.TextMuted)
+		ui.Text(c, val).FontSize(20).FontWeight(600).FontFeatures("tnum")
+		ui.Text(c, label).FontSize(12).TextColor(t.TextMuted)
 	})
 }

@@ -168,48 +168,51 @@ func (a *AppState) viewJournalHome(c *ui.Context, t *ui.Theme) {
 	for _, u := range unlocked {
 		familyCount[fallbackText(u.FamilyName, "未分类")]++
 	}
+	optA, optB := opticalAccentColors(t)
 
 	ui.Box(c).Fill().Children(func() {
 		ui.Column(c).Fill().Children(func() {
-			ui.Column(c).FillWidth().Padding(16, 20, 0, 20).Gap(12).Children(func() {
+			ui.Column(c).FillWidth().Padding(16, 18, 10, 18).Gap(12).Children(func() {
 				ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "日志").FontSize(24).FontWeight(700).LetterSpacing(-0.4).Role(ui.RoleHeading).Level(1)
+					ui.Text(c, "日志").FontSize(26).FontWeight(600).LetterSpacing(-0.1).Role(ui.RoleHeading).Level(1)
 
-					shareBtn := ui.Row(c.Key("j-export-btn")).Height(32).PaddingX(12).Radius(16).
-						Background(t.Surface).Gap(5).AlignItems(ui.Center).
-						Role(ui.RoleButton).Label("分享或导出")
-					if t.Dark {
-						shareBtn.Border(1, t.Border)
-					}
+					shareBtn := applySculptedSecondaryPillStyle(
+						ui.Row(c.Key("j-export-btn")).Height(34).PaddingX(14).Radius(17).
+							Gap(5).AlignItems(ui.Center).
+							Role(ui.RoleButton).Label("分享或导出"),
+						t,
+					)
 					shareBtn.Children(func() {
 						ui.Icon(c, iconShare).FontSize(13).TextColor(t.Text)
-						ui.Text(c, "导出").FontSize(12.5).FontWeight(500)
+						ui.Text(c, "导出").FontSize(13).FontWeight(500)
 					})
 					if shareBtn.Clicked() {
 						a.exportSheetOpen = true
 					}
 				})
 
-				// 克制扁平解锁进度带 + 极细 4px 单色进度条
-				ui.Column(c).FillWidth().Padding(14, 16).Radius(14).Background(t.Surface).Gap(8).Children(func() {
+				// 立体解锁成就卡片 + 内凹进度槽与光学微渐变光条
+				tactileCard(c, t).Padding(16).Gap(10).Children(func() {
 					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Baseline).Children(func() {
 						ui.Row(c).Gap(6).AlignItems(ui.Baseline).Children(func() {
-							ui.Textf(c, "%d", len(unlocked)).FontSize(24).FontWeight(700).TextColor(t.Text).FontFeatures("tnum")
-							ui.Textf(c, "/ %d 种已解锁", chinaTotal).FontSize(12.5).TextColor(t.TextMuted).FontFeatures("tnum")
+							ui.Textf(c, "%d", len(unlocked)).FontSize(28).FontWeight(600).TextColor(t.Text).FontFeatures("tnum")
+							ui.Textf(c, "/ %d 种已解锁", chinaTotal).FontSize(13).TextColor(t.TextMuted).FontFeatures("tnum")
 						})
-						ui.Textf(c, "%d 条日志 · %d 科", len(entries), len(familyCount)).FontSize(12).TextColor(t.TextMuted)
+						ui.Textf(c, "%d 条日志 · %d 科", len(entries), len(familyCount)).FontSize(12).TextColor(secondaryTextColor(t))
 					})
-					ui.Box(c).FillWidth().Height(4).Radius(2).Background(t.Border).
-						Draw(func(p *ui.Painter, r ui.Rect) {
-							if progress <= 0 {
-								return
+					tactileRecessedStyle(ui.Box(c).FillWidth().Height(7).Clip(), t, 3.5).Children(func() {
+						if progress > 0 {
+							pct := progress * 100
+							if pct < 2.5 {
+								pct = 2.5
 							}
-							w := max(float32(4), r.W*progress)
-							p.Fill(ui.Rect{X: r.X, Y: r.Y, W: w, H: r.H}, t.Accent, 2)
-						})
+							ui.Box(c).FillHeight().WidthPercent(pct).Radius(3.5).
+								LinearGradient(ui.LinearGradient{From: optA, To: optB, Angle: 90})
+						}
+					})
 				})
 
-				underlineTabStrip(c, "j-subtab", &a.session.JournalSubTab, t, "时间线日志", "已解锁图谱")
+				tactileSegmentedControl(c, "j-subtab", &a.session.JournalSubTab, t, "时间线日志", "已解锁图谱")
 			})
 
 			if a.session.JournalSubTab == 0 {
@@ -219,12 +222,16 @@ func (a *AppState) viewJournalHome(c *ui.Context, t *ui.Theme) {
 			}
 		})
 
-		// 右下角 52×52 纯圆形单色悬浮主按钮
+		// 右下角立体浮雕圆形主按钮（避开底部 Liquid Glass 悬空导航栏）
 		if !a.journalSheetOpen {
-			fab := ui.Box(c.Key("j-fab")).Size(52, 52).Radius(26).Background(t.Accent).
-				Shadow(0, 6, 18, 0, ui.RGBA(0, 0, 0, 0.16)).Center().
-				Absolute().Right(20).Bottom(18).
-				Role(ui.RoleButton).Label("新建观鸟日志")
+			_, _, bottom, _ := c.SafeArea()
+			fabBottom := max(float32(88), bottom+82)
+			fab := applySculptedPrimaryStyle(
+				ui.Box(c.Key("j-fab")).Size(54, 54).Radius(27).Center().
+					Absolute().Right(18).Bottom(fabBottom).
+					Role(ui.RoleButton).Label("新建观鸟日志"),
+				t,
+			)
 			fab.Children(func() {
 				ui.Icon(c, iconPlus).FontSize(22).TextColor(t.AccentText)
 			})
@@ -236,7 +243,7 @@ func (a *AppState) viewJournalHome(c *ui.Context, t *ui.Theme) {
 }
 
 func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
-	ui.Box(c).Padding(12, 20, 6, 20).Children(func() {
+	ui.Box(c).Padding(2, 18, 8, 18).Children(func() {
 		if minimalSearchBar(c, "j-search", &a.session.JournalQuery, "搜索鸟种、地点或笔记", "搜索日志", t) {
 			a.refreshJournalList()
 		}
@@ -248,20 +255,22 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 		a.journalRefresh.Refreshing = false
 	}
 	scroll.Children(func() {
-		ui.Column(c).FillWidth().Padding(4, 20, 88, 20).Gap(0).Children(func() {
+		ui.Column(c).FillWidth().Padding(4, 18, 112, 18).Gap(10).Children(func() {
 			if len(a.filteredEntries) == 0 {
-				ui.Column(c).FillWidth().Padding(56, 16).Center().Gap(10).Children(func() {
-					ui.Icon(c, iconJournal).FontSize(30).TextColor(t.TextMuted.Alpha(0.4))
-					ui.Text(c, "暂无观鸟日志").FontSize(15.5).FontWeight(600)
+				tactileCard(c, t).Padding(34).Center().Gap(10).Children(func() {
+					tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
+						ui.Icon(c, iconJournal).FontSize(22).TextColor(t.TextMuted)
+					})
+					ui.Text(c, "暂无观鸟日志").FontSize(16).FontWeight(600)
 					ui.Text(c, "点击右下角 + 记录今天的目击并点亮图鉴").FontSize(13).TextColor(t.TextMuted)
 				})
 				return
 			}
 
-			ui.Column(c).FillWidth().Dividers(1, t.Border).Children(func() {
-				for i, item := range a.filteredEntries {
-					entry := item
-					mobile.SwipeRow(c.Key("jsw-"+entry.ID), nil, mobile.SwipeOptions{
+			for i, item := range a.filteredEntries {
+				entry := item
+				tactileCard(c, t).Key("jsw-"+entry.ID).Clip().Children(func() {
+					mobile.SwipeRow(c, nil, mobile.SwipeOptions{
 						Trailing: []mobile.SwipeAction{{
 							Label:       "删除",
 							Destructive: true,
@@ -271,32 +280,31 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 							},
 						}},
 					}, func() {
-						row := ui.Row(c).FillWidth().Padding(14, 0).Gap(12).AlignItems(ui.Center).
-							Background(t.Background).
+						row := ui.Row(c).FillWidth().Padding(14, 16).Gap(12).AlignItems(ui.Center).
 							Role(ui.RoleButton).Label(entry.ComName + " 日志详情")
 						row.Children(func() {
 							if len(entry.PhotoPaths) > 0 {
 								p := entry.PhotoPaths[0]
 								a.loadLocalImageAsync(p)
 								if src, ok := a.localImgCache[p]; ok {
-									ui.Image(c, src).Size(60, 60).Fit(ui.Cover).Radius(12).Shrink(0).Label(entry.ComName)
+									ui.Image(c, src).Size(62, 62).Fit(ui.Cover).Radius(12).Shrink(0).Label(entry.ComName)
 								} else {
-									ui.Box(c).Size(60, 60).Radius(12).Background(t.Surface).Center().Shrink(0).Children(func() {
-										ui.Icon(c, iconImage).FontSize(20).TextColor(t.TextMuted.Alpha(0.5))
+									tactileRecessedStyle(ui.Box(c).Size(62, 62), t, 12).Center().Shrink(0).Children(func() {
+										ui.Icon(c, iconImage).FontSize(20).TextColor(t.TextMuted)
 									})
 								}
 							}
 
 							ui.Column(c).Grow(1).Basis(0).Gap(3).Children(func() {
 								ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Baseline).Gap(8).Children(func() {
-									ui.Text(c, entry.ComName).FontSize(15.5).FontWeight(600).SingleLine().Grow(1)
-									ui.Textf(c, "%d 只", max(1, entry.Count)).FontSize(12.5).FontWeight(600).TextColor(secondaryTextColor(t)).FontFeatures("tnum")
+									ui.Text(c, entry.ComName).FontSize(15).FontWeight(600).SingleLine().Grow(1)
+									statusPill(c, fmt.Sprintf("%d 只", max(1, entry.Count)), softPillColor(t), secondaryTextColor(t))
 								})
 								ui.Textf(c, "%s · %s", model.FormatObsTime(entry.ObservedAt), fallbackText(entry.Location, "野外地点")).
 									FontSize(12).TextColor(t.TextMuted).SingleLine()
 
 								if strings.TrimSpace(entry.Notes) != "" {
-									ui.Text(c, entry.Notes).FontSize(13).TextColor(secondaryTextColor(t)).MaxLines(2)
+									ui.Text(c, entry.Notes).FontSize(13).LineHeight(1.5).TextColor(secondaryTextColor(t)).MaxLines(2)
 								}
 
 								if entry.AudioPath != "" || len(entry.PhotoPaths) > 1 {
@@ -308,15 +316,15 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 											if isThis && pst.Playing {
 												label = "暂停录音"
 											}
-											playPill := ui.Row(c.Key(fmt.Sprintf("jt-aud-%d", i))).Padding(3, 9).Radius(999).
-												Background(t.Surface).Gap(4).AlignItems(ui.Center).Role(ui.RoleButton).Label(label)
+											playPill := ui.Row(c.Key(fmt.Sprintf("jt-aud-%d", i))).Padding(4, 10).Radius(999).
+												Background(opticalAccentColor(t).Alpha(0.12)).Gap(4).AlignItems(ui.Center).Role(ui.RoleButton).Label(label)
 											playPill.Children(func() {
 												ic := iconPlay
 												if isThis && pst.Playing {
 													ic = iconPause
 												}
-												ui.Icon(c, ic).FontSize(10).TextColor(t.Text)
-												ui.Text(c, label).FontSize(11).FontWeight(500).TextColor(t.Text)
+												ui.Icon(c, ic).FontSize(10).TextColor(opticalAccentColor(t))
+												ui.Text(c, label).FontSize(11).FontWeight(500).TextColor(opticalAccentColor(t))
 											})
 											if playPill.Clicked() {
 												if isThis && pst.Active {
@@ -329,7 +337,7 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 											}
 										}
 										if len(entry.PhotoPaths) > 1 {
-											statusPill(c, fmt.Sprintf("%d 张照片", len(entry.PhotoPaths)), t.Surface, t.TextMuted)
+											statusPill(c, fmt.Sprintf("%d 张照片", len(entry.PhotoPaths)), softPillColor(t), t.TextMuted)
 										}
 									})
 								}
@@ -342,14 +350,14 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 							a.router.Push("/journal/" + entry.ID)
 						}
 					})
-				}
-			})
+				})
+			}
 		})
 	})
 }
 
 func (a *AppState) buildLifelistGrid(c *ui.Context, t *ui.Theme, unlocked []model.UnlockedBird) {
-	ui.Box(c).Padding(12, 20, 8, 20).Children(func() {
+	ui.Box(c).Padding(2, 18, 8, 18).Children(func() {
 		minimalSearchBar(c, "ll-search", &a.session.LifelistFilter, "搜索已解锁鸟种或发现地", "搜索已解锁", t)
 	})
 
@@ -364,11 +372,13 @@ func (a *AppState) buildLifelistGrid(c *ui.Context, t *ui.Theme, unlocked []mode
 	}
 
 	ui.Scroll(c.Key("ll-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
-		ui.Column(c).FillWidth().Padding(4, 20, 88, 20).Gap(14).Children(func() {
+		ui.Column(c).FillWidth().Padding(4, 18, 112, 18).Gap(12).Children(func() {
 			if len(visible) == 0 {
-				ui.Column(c).FillWidth().Padding(56, 16).Center().Gap(10).Children(func() {
-					ui.Icon(c, iconAward).FontSize(30).TextColor(t.TextMuted.Alpha(0.4))
-					ui.Text(c, "尚未解锁鸟种").FontSize(15.5).FontWeight(600)
+				tactileCard(c, t).Padding(34).Center().Gap(10).Children(func() {
+					tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
+						ui.Icon(c, iconAward).FontSize(22).TextColor(t.TextMuted)
+					})
+					ui.Text(c, "尚未解锁鸟种").FontSize(16).FontWeight(600)
 					ui.Text(c, "记录一条观鸟日志即可在此点亮物种").FontSize(13).TextColor(t.TextMuted)
 				})
 				return
@@ -384,43 +394,60 @@ func (a *AppState) buildLifelistGrid(c *ui.Context, t *ui.Theme, unlocked []mode
 							continue
 						}
 						bird := visible[idx]
-						tile := ui.Column(c.Key("llcard-"+bird.SpeciesCode)).Grow(1).Basis(0).
-							Role(ui.RoleButton).Label(bird.ComName)
-						tile.Children(func() {
-							ui.Box(c).FillWidth().Height(140).Radius(14).Clip().Background(t.Surface).Children(func() {
-								if bird.CoverPhotoPath != "" {
-									a.loadLocalImageAsync(bird.CoverPhotoPath)
-									if src, ok := a.localImgCache[bird.CoverPhotoPath]; ok {
-										ui.Image(c, src).Fill().Fit(ui.Cover).Label(bird.ComName)
-									} else {
-										ui.Box(c).Fill().Center().Children(func() {
-											ui.Icon(c, iconImage).FontSize(22).TextColor(t.TextMuted.Alpha(0.5))
-										})
-									}
-								} else if thumbURL := a.speciesThumbURL(bird.SpeciesCode); thumbURL != "" {
-									netimage.Image(c, thumbURL, netimage.Options{
-										MaxSide:     340,
-										Fit:         ui.Cover,
-										Placeholder: t.Surface,
-									}).Fill()
-								} else {
-									ui.Box(c).Fill().Center().Children(func() {
-										ui.Icon(c, iconBird).FontSize(28).TextColor(t.TextMuted.Alpha(0.32))
-									})
-								}
-								ui.Textf(c, "%d 次", max(1, bird.TotalSightings)).
-									Absolute().Right(8).Bottom(8).Padding(2, 8).Radius(999).
-									FontSize(11).FontWeight(500).
-									Background(ui.RGBA(0, 0, 0, 0.48)).TextColor(ui.RGB(255, 255, 255))
-							})
+						hasImg := bird.CoverPhotoPath != "" || a.speciesThumbURL(bird.SpeciesCode) != ""
+						tile := applyCardRimAndShadow(
+							ui.Box(c.Key("llcard-"+bird.SpeciesCode)).Grow(1).Basis(0).Height(196),
+							18, t,
+						).Clip().Role(ui.RoleButton).Label(bird.ComName)
 
-							ui.Column(c).FillWidth().Padding(7, 2, 0, 2).Gap(1).Children(func() {
-								ui.Text(c, bird.ComName).FontSize(14.5).FontWeight(600).SingleLine()
-								fam := bird.FamilyName
-								if tx, ok := a.taxonByCode[bird.SpeciesCode]; ok {
-									fam = model.FamilyZh(tx.FamilySciName, tx.FamilyComName)
+						tile.Children(func() {
+							if bird.CoverPhotoPath != "" {
+								a.loadLocalImageAsync(bird.CoverPhotoPath)
+								if src, ok := a.localImgCache[bird.CoverPhotoPath]; ok {
+									ui.Image(c, src).Fill().Fit(ui.Cover).Label(bird.ComName)
 								}
-								ui.Text(c, fallbackText(fam, bird.FirstLocation)).FontSize(11.5).TextColor(t.TextMuted).SingleLine()
+							} else if thumbURL := a.speciesThumbURL(bird.SpeciesCode); thumbURL != "" {
+								netimage.Image(c, thumbURL, netimage.Options{
+									MaxSide:     380,
+									Fit:         ui.Cover,
+									Placeholder: t.Surface,
+								}).Fill()
+							} else {
+								ui.Box(c).Fill().Center().Children(func() {
+									ui.Icon(c, iconBird).FontSize(34).TextColor(t.TextMuted.Alpha(0.32))
+								})
+							}
+
+							if hasImg {
+								ui.Box(c).Absolute().Left(0).Bottom(0).Right(0).Height(88).PassThrough().
+									LinearGradient(ui.LinearGradient{
+										Angle: 180,
+										Stops: []ui.GradientStop{
+											{Color: ui.Transparent, At: 0},
+											{Color: ui.RGBA(8, 11, 17, 0.36), At: 0.45},
+											{Color: ui.RGBA(8, 11, 17, 0.86), At: 1.0},
+										},
+									})
+							}
+
+							ui.Textf(c, "%d 次", max(1, bird.TotalSightings)).
+								Absolute().Right(10).Top(10).Padding(3, 9).Radius(999).
+								FontSize(11).FontWeight(500).FontFeatures("tnum").
+								Background(ui.RGBA(0, 0, 0, 0.45)).TextColor(ui.RGB(255, 255, 255))
+
+							titleCol := t.Text
+							subCol := t.TextMuted
+							if hasImg {
+								titleCol = ui.RGB(255, 255, 255)
+								subCol = ui.RGBA(255, 255, 255, 0.80)
+							}
+							fam := bird.FamilyName
+							if tx, ok := a.taxonByCode[bird.SpeciesCode]; ok {
+								fam = model.FamilyZh(tx.FamilySciName, tx.FamilyComName)
+							}
+							ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(0, 12, 12, 12).Gap(2).PassThrough().Children(func() {
+								ui.Text(c, bird.ComName).FontSize(15).FontWeight(600).TextColor(titleCol).SingleLine()
+								ui.Text(c, fallbackText(fam, bird.FirstLocation)).FontSize(12).TextColor(subCol).SingleLine()
 							})
 						})
 						if tile.Clicked() {
@@ -467,27 +494,26 @@ func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID str
 		return
 	}
 
-	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		ui.Row(c).FillWidth().Padding(12, 20, 10, 20).Gap(8).AlignItems(ui.Center).Children(func() {
-			if circleIconBtn(c, "jd-back-btn", "返回", iconBack, t.Surface, t.Text, 36).Clicked() {
+	ui.Column(c).Fill().Children(func() {
+		ui.Row(c).FillWidth().Padding(14, 18, 10, 18).Gap(8).AlignItems(ui.Center).Children(func() {
+			if tactileIconBtn(c, "jd-back-btn", "返回", iconBack, 36, t).Clicked() {
 				a.goBack()
 			}
-			ui.Text(c, entry.ComName).FontSize(16.5).FontWeight(600).SingleLine().Grow(1)
+			ui.Text(c, entry.ComName).FontSize(16).FontWeight(600).SingleLine().Grow(1)
 			if filterPill(c, "jd-edit", "编辑", false, t).Clicked() {
 				a.openEditJournalModal(*entry)
 			}
-			if circleIconBtn(c, "jd-del", "删除日志", iconTrash, t.Danger.Alpha(0.1), t.Danger, 34).Clicked() {
+			if circleIconBtn(c, "jd-del", "删除日志", iconTrash, t.Danger.Alpha(0.12), t.Danger, 34).Clicked() {
 				a.jDeleteTargetID = entry.ID
 				a.jDeleteConfirm = true
 			}
 		})
-		minimalDivider(c, t)
 
 		ui.Scroll(c.Key("jd-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
-			ui.Column(c).FillWidth().Padding(0, 0, 32, 0).Gap(18).Children(func() {
+			ui.Column(c).FillWidth().Padding(6, 18, 44, 18).Gap(14).Children(func() {
 				if len(entry.PhotoPaths) > 0 {
 					count := len(entry.PhotoPaths)
-					ui.Box(c).FillWidth().Height(280).Background(t.Surface).Children(func() {
+					tactileCard(c, t).Height(264).Clip().Children(func() {
 						mobile.PageView(c, &a.journalDetailPager, count, func(i int) {
 							p := entry.PhotoPaths[i]
 							a.loadLocalImageAsync(p)
@@ -507,44 +533,51 @@ func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID str
 							}
 						}).Fill()
 						ui.Textf(c, "%d / %d", a.journalDetailPager.Page+1, count).
-							Absolute().Left(16).Bottom(12).Padding(3, 8).Radius(999).
-							FontSize(11.5).FontWeight(500).
+							Absolute().Left(14).Bottom(12).Padding(3, 9).Radius(999).
+							FontSize(12).FontWeight(500).FontFeatures("tnum").
 							Background(ui.RGBA(0, 0, 0, 0.48)).TextColor(ui.RGB(255, 255, 255))
 						if count > 1 {
-							ui.Box(c).Absolute().Right(16).Bottom(12).Children(func() {
+							ui.Box(c).Absolute().Right(14).Bottom(12).Children(func() {
 								mobile.PageDots(c, a.journalDetailPager.Page, count)
 							})
 						}
 					})
 				}
 
-				ui.Column(c).FillWidth().Padding(8, 20, 0, 20).Gap(20).Children(func() {
-					ui.Column(c).FillWidth().Gap(5).Children(func() {
-						ui.Text(c, entry.ComName).FontSize(24).FontWeight(700).LetterSpacing(-0.3)
-						ui.Text(c, entry.SciName).FontSize(14).TextColor(t.TextMuted)
-						ui.Row(c).Gap(6).Wrap().Padding(4, 0, 0, 0).Children(func() {
-							statusPill(c, model.FormatObsTime(entry.ObservedAt), t.Surface, secondaryTextColor(t))
-							statusPill(c, fallbackText(entry.Location, "未填地点"), t.Surface, secondaryTextColor(t))
-							statusPill(c, fmt.Sprintf("%d 只", max(1, entry.Count)), t.Surface, t.Text)
-						})
+				tactileCard(c, t).Padding(16).Gap(8).Children(func() {
+					ui.Text(c, entry.ComName).FontSize(24).FontWeight(600).LetterSpacing(-0.1)
+					ui.Text(c, entry.SciName).FontSize(14).Italic().TextColor(t.TextMuted)
+					ui.Row(c).Gap(6).Wrap().Padding(4, 0, 0, 0).Children(func() {
+						statusPill(c, model.FormatObsTime(entry.ObservedAt), softPillColor(t), secondaryTextColor(t))
+						statusPill(c, fallbackText(entry.Location, "未填地点"), softPillColor(t), secondaryTextColor(t))
+						statusPill(c, fmt.Sprintf("%d 只", max(1, entry.Count)), softPillColor(t), t.Text)
 					})
+				})
 
-					if entry.AudioPath != "" {
-						minimalDivider(c, t)
-						pst := a.player.Status()
-						isThis := pst.SourceKey == entry.AudioPath
-						ui.Row(c).FillWidth().Padding(10, 12).Radius(14).Background(t.Surface).Gap(12).AlignItems(ui.Center).Children(func() {
+				if entry.AudioPath != "" {
+					pst := a.player.Status()
+					isThis := pst.SourceKey == entry.AudioPath
+					tactileCard(c, t).Padding(14).Children(func() {
+						ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 							ic := iconPlay
 							lbl := "播放个人录音"
-							bg := t.Background
+							playBtn := ui.Box(c.Key("jd-aud-play")).Size(40, 40).Radius(20).Center().Shrink(0).
+								Role(ui.RoleButton).Label(lbl)
 							fg := t.Text
 							if isThis && pst.Playing {
 								ic = iconPause
-								lbl = "暂停录音"
-								bg = t.Accent
-								fg = t.AccentText
+								playBtn.Label("暂停录音")
+								fg = ui.RGB(255, 255, 255)
+								c1, c2 := opticalAccentColors(t)
+								playBtn.LinearGradient(ui.LinearGradient{From: c1, To: c2, Angle: 180}).
+									Shadow(0, 4, 12, 0, c1.Alpha(0.35))
+							} else {
+								applySculptedSecondaryPillStyle(playBtn, t)
 							}
-							if circleIconBtn(c, "jd-aud-play", lbl, ic, bg, fg, 38).Clicked() {
+							playBtn.Children(func() {
+								ui.Icon(c, ic).FontSize(15).TextColor(fg)
+							})
+							if playBtn.Clicked() {
 								if isThis && pst.Active {
 									a.player.TogglePause()
 								} else {
@@ -554,29 +587,27 @@ func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID str
 								}
 							}
 							ui.Column(c).Grow(1).Gap(2).Children(func() {
-								ui.Text(c, "现场鸟鸣录音").FontSize(14.5).FontWeight(500)
+								ui.Text(c, "现场鸟鸣录音").FontSize(14).FontWeight(500)
 								ui.Text(c, filepath.Base(entry.AudioPath)).FontSize(12).TextColor(t.TextMuted).SingleLine()
 							})
 						})
-					}
-
-					minimalDivider(c, t)
-
-					ui.Column(c).FillWidth().Gap(8).Selectable().Children(func() {
-						ui.Text(c, "观察笔记").FontSize(15.5).FontWeight(600)
-						if strings.TrimSpace(entry.Notes) != "" {
-							ui.Text(c, entry.Notes).FontSize(15).LineHeight(1.7).TextColor(secondaryTextColor(t))
-						} else {
-							ui.Text(c, "本次观测未填写文字笔记。").FontSize(13).TextColor(t.TextMuted)
-						}
 					})
+				}
 
-					if _, ok := a.taxonByCode[entry.SpeciesCode]; ok {
-						if monochromeButton(c, "jd-goto-guide", "查看图鉴详情 ↗", false, t).FillWidth().Clicked() {
-							a.OpenSpeciesInGuide(entry.SpeciesCode)
-						}
+				tactileCard(c, t).Padding(16).Gap(8).Selectable().Children(func() {
+					ui.Text(c, "观察笔记").FontSize(16).FontWeight(600)
+					if strings.TrimSpace(entry.Notes) != "" {
+						ui.Text(c, entry.Notes).FontSize(15).LineHeight(1.7).TextColor(secondaryTextColor(t))
+					} else {
+						ui.Text(c, "本次观测未填写文字笔记。").FontSize(13).TextColor(t.TextMuted)
 					}
 				})
+
+				if _, ok := a.taxonByCode[entry.SpeciesCode]; ok {
+					if monochromeButton(c, "jd-goto-guide", "查看图鉴详情 ↗", false, t).FillWidth().Clicked() {
+						a.OpenSpeciesInGuide(entry.SpeciesCode)
+					}
+				}
 			})
 		})
 	})
@@ -610,7 +641,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 					a.jRecBusy = false
 					a.journalSheetOpen = false
 				}
-				ui.Text(c, title).FontSize(16.5).FontWeight(600)
+				ui.Text(c, title).FontSize(16).FontWeight(600)
 				saveBtn := filterPill(c, "j-modal-save", "保存记录", true, t).Disabled(recStatus.Recording || a.jRecBusy)
 				if saveBtn.Clicked() {
 					a.saveJournalDraft(c)
@@ -619,10 +650,10 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 			minimalDivider(c, t)
 
 			ui.Scroll(c.Key("j-sheet-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
-				ui.Column(c).FillWidth().Padding(16, 20, 32, 20).Gap(18).Children(func() {
-					// 1. 观测鸟种
-					ui.Column(c).FillWidth().Gap(8).Children(func() {
-						ui.Text(c, "观测鸟种").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted)
+				ui.Column(c).FillWidth().Padding(10, 18, 28, 18).Gap(10).Children(func() {
+					// 1. 观测鸟种卡片
+					tactileCard(c, t).Padding(13).Gap(8).Children(func() {
+						ui.Text(c, "观测鸟种").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
 						minimalTextInput(c, "j-species-input", &a.jDraftSpecies,
 							"输入中文名或拉丁学名（如：普通翠鸟）", "鸟种", t)
 
@@ -639,23 +670,23 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 						}
 					})
 
-					minimalDivider(c, t)
-
-					// 2. 地点、时间与数量
-					ui.Column(c).FillWidth().Gap(12).Children(func() {
+					// 2. 地点、时间与数量步进器卡片
+					tactileCard(c, t).Padding(13).Gap(10).Children(func() {
 						ui.Column(c).Gap(6).Children(func() {
-							ui.Text(c, "地点与坐标").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted)
+							ui.Text(c, "地点与坐标").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
 							ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 								minimalTextInput(c, "j-obs-loc", &a.jDraftLocation,
 									"公园、湿地或坐标", "观测地点", t).Grow(1)
-								gpsBtn := ui.Row(c.Key("j-loc-gps")).Size(44, 44).Radius(12).
-									Background(t.Surface).Center().Shrink(0).
-									Role(ui.RoleButton).Label("定位当前位置")
+								gpsBtn := applySculptedSecondaryPillStyle(
+									ui.Row(c.Key("j-loc-gps")).Size(44, 44).Radius(12).Center().Shrink(0).
+										Role(ui.RoleButton).Label("定位当前位置"),
+									t,
+								)
 								gpsBtn.Children(func() {
 									if a.jDraftGPSBusy {
 										ui.Spinner(c).Label("定位")
 									} else {
-										ui.Icon(c, iconLocate).FontSize(17).TextColor(t.Text)
+										ui.Icon(c, iconLocate).FontSize(17).TextColor(opticalAccentColor(t))
 									}
 								})
 								if gpsBtn.Clicked() {
@@ -666,18 +697,32 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 
 						ui.Row(c).FillWidth().Gap(12).AlignItems(ui.End).Children(func() {
 							ui.Column(c).Grow(1).Gap(6).Children(func() {
-								ui.Text(c, "观测时间").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted)
+								ui.Text(c, "观测时间").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
 								minimalTextInput(c, "j-obs-dt", &a.jDraftObservedAt, "", "观测时间", t)
 							})
 
 							ui.Column(c).Gap(6).Children(func() {
-								ui.Text(c, "数量").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted)
-								ui.Row(c).Height(44).Radius(12).Background(t.Surface).AlignItems(ui.Center).Gap(6).PaddingX(8).Children(func() {
-									if circleIconBtn(c, "cnt-dec", "减少数量", iconMinus, t.Background, t.Text, 28).Clicked() && a.jDraftCount > 1 {
+								ui.Text(c, "数量").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
+								tactileRecessedStyle(ui.Row(c).Height(44).AlignItems(ui.Center).Gap(6).PaddingX(7), t, 12).Children(func() {
+									dec := applySculptedSecondaryPillStyle(
+										ui.Box(c.Key("cnt-dec")).Size(28, 28).Radius(14).Center().
+											Role(ui.RoleButton).Label("减少数量").Children(func() {
+											ui.Icon(c, iconMinus).FontSize(13).TextColor(t.Text)
+										}),
+										t,
+									)
+									if dec.Clicked() && a.jDraftCount > 1 {
 										a.jDraftCount--
 									}
 									ui.Textf(c, " %d ", max(1, a.jDraftCount)).FontSize(15).FontWeight(600).FontFeatures("tnum")
-									if circleIconBtn(c, "cnt-inc", "增加数量", iconPlus, t.Accent, t.AccentText, 28).Clicked() {
+									inc := applySculptedPrimaryStyle(
+										ui.Box(c.Key("cnt-inc")).Size(28, 28).Radius(14).Center().
+											Role(ui.RoleButton).Label("增加数量").Children(func() {
+											ui.Icon(c, iconPlus).FontSize(13).TextColor(t.AccentText)
+										}),
+										t,
+									)
+									if inc.Clicked() {
 										a.jDraftCount++
 									}
 								})
@@ -685,22 +730,22 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 						})
 					})
 
-					minimalDivider(c, t)
-
-					// 3. 现场照片
-					ui.Column(c).FillWidth().Gap(10).Children(func() {
+					// 3. 现场照片卡片
+					tactileCard(c, t).Padding(13).Gap(8).Children(func() {
 						ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-							ui.Text(c, "现场照片").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted)
+							ui.Text(c, "现场照片").FontSize(14).FontWeight(500)
 							ui.Textf(c, "%d 张", len(a.jDraftPhotos)).FontSize(12).TextColor(t.TextMuted)
 						})
 
 						ui.ScrollHorizontal(c.Key("j-draft-photos-strip")).FillWidth().Gap(10).Children(func() {
-							addTile := ui.Column(c.Key("j-add-photo-tile")).Size(76, 76).Radius(14).
-								Background(t.Surface).Center().Gap(4).Shrink(0).
-								Role(ui.RoleButton).Label("添加照片")
+							addTile := tactileRecessedStyle(
+								ui.Column(c.Key("j-add-photo-tile")).Size(68, 68).Center().Gap(3).Shrink(0).
+									Role(ui.RoleButton).Label("添加照片"),
+								t, 14,
+							)
 							addTile.Children(func() {
-								ui.Icon(c, iconCamera).FontSize(20).TextColor(t.Text)
-								ui.Text(c, "添加").FontSize(11.5).FontWeight(500).TextColor(secondaryTextColor(t))
+								ui.Icon(c, iconCamera).FontSize(19).TextColor(t.Text)
+								ui.Text(c, "添加").FontSize(11).FontWeight(500).TextColor(secondaryTextColor(t))
 							})
 							if addTile.Clicked() {
 								a.journalPhotoSheet = true
@@ -710,11 +755,11 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 								idx := i
 								path := p
 								a.loadLocalImageAsync(path)
-								ui.Box(c.Key(fmt.Sprintf("jdp-%d", i))).Size(76, 76).Radius(14).Clip().Shrink(0).Background(t.Surface).Children(func() {
+								ui.Box(c.Key(fmt.Sprintf("jdp-%d", i))).Size(68, 68).Radius(14).Clip().Shrink(0).Background(softPillColor(t)).Children(func() {
 									if src, ok := a.localImgCache[path]; ok {
 										ui.Image(c, src).Fill().Fit(ui.Cover)
 									}
-									rm := circleIconBtn(c, fmt.Sprintf("jdprm-%d", i), "移除照片", iconClose, ui.RGBA(0, 0, 0, 0.55), ui.RGB(255, 255, 255), 22).
+									rm := circleIconBtn(c, fmt.Sprintf("jdprm-%d", i), "移除照片", iconClose, ui.RGBA(0, 0, 0, 0.58), ui.RGB(255, 255, 255), 20).
 										Absolute().Top(4).Right(4)
 									if rm.Clicked() {
 										a.jDraftPhotos = append(a.jDraftPhotos[:idx], a.jDraftPhotos[idx+1:]...)
@@ -724,32 +769,36 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 						})
 					})
 
-					minimalDivider(c, t)
-
-					// 4. 鸟鸣现场录音（克制水平录音条）
-					ui.Column(c).FillWidth().Gap(10).Children(func() {
+					// 4. 鸟鸣现场录音（同心圆环录音棚质感麦克风控件）
+					tactileCard(c, t).Padding(13).Gap(8).Children(func() {
 						ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-							ui.Text(c, "现场鸟鸣录音").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted)
+							ui.Text(c, "现场鸟鸣录音").FontSize(14).FontWeight(500)
 							if filterPill(c, "j-pick-audio", "导入音频", false, t).Disabled(recStatus.Recording || a.jRecBusy).Clicked() {
 								a.pickJournalAudioAsync()
 							}
 						})
 
-						ui.Row(c).FillWidth().Padding(12, 14).Radius(14).Background(t.Surface).Gap(14).AlignItems(ui.Center).Children(func() {
+						ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 							if !recStatus.Recording {
-								recCircle := ui.Box(c.Key("j-rec-start")).Size(44, 44).Radius(22).
-									Background(t.Accent).Center().Shrink(0).
-									Role(ui.RoleButton).Label("开始录音")
-								recCircle.Children(func() {
-									ui.Icon(c, iconMic).FontSize(20).TextColor(t.AccentText)
+								halo := ui.Box(c).Size(54, 54).Radius(27).Center().Shrink(0).
+									Background(t.Text.Alpha(0.06)).Border(1, subtleHairlineColor(t))
+								halo.Children(func() {
+									recCircle := applySculptedPrimaryStyle(
+										ui.Box(c.Key("j-rec-start")).Size(42, 42).Radius(21).Center().
+											Role(ui.RoleButton).Label("开始录音"),
+										t,
+									)
+									recCircle.Children(func() {
+										ui.Icon(c, iconMic).FontSize(18).TextColor(t.AccentText)
+									})
+									if recCircle.Clicked() && !a.jRecBusy {
+										a.startJournalRecording()
+									}
 								})
-								if recCircle.Clicked() && !a.jRecBusy {
-									a.startJournalRecording()
-								}
 
 								ui.Column(c).Grow(1).Gap(3).Children(func() {
 									if a.jDraftAudio != "" {
-										ui.Text(c, "已录制："+filepath.Base(a.jDraftAudio)).FontSize(13.5).FontWeight(500).SingleLine()
+										ui.Text(c, "已录制："+filepath.Base(a.jDraftAudio)).FontSize(14).FontWeight(500).SingleLine()
 										ui.Row(c).Gap(6).Children(func() {
 											if filterPill(c, "j-prev-aud", "试听", true, t).Clicked() {
 												a.player.PlayFile(a.jDraftAudio, "录音试听", filepath.Base(a.jDraftAudio), func() {
@@ -761,20 +810,26 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 											}
 										})
 									} else {
-										ui.Text(c, "点击左侧按钮录制鸟鸣").FontSize(13.5).FontWeight(500)
-										ui.Text(c, "支持 WAV / MP3 / OGG / FLAC").FontSize(11.5).TextColor(t.TextMuted)
+										ui.Text(c, "点击麦克风录制现场鸟鸣").FontSize(14).FontWeight(500)
+										ui.Text(c, "支持 WAV / MP3 / OGG / FLAC").FontSize(12).TextColor(t.TextMuted)
 									}
 								})
 							} else {
-								stopCircle := ui.Box(c.Key("j-rec-stop")).Size(44, 44).Radius(22).
-									Background(t.Danger).Center().Shrink(0).
-									Role(ui.RoleButton).Label("停止录音")
-								stopCircle.Children(func() {
-									ui.Icon(c, iconStop).FontSize(18).TextColor(ui.RGB(255, 255, 255))
+								halo := ui.Box(c).Size(54, 54).Radius(27).Center().Shrink(0).
+									Background(t.Danger.Alpha(0.14)).Border(1, t.Danger.Alpha(0.3))
+								halo.Children(func() {
+									stopCircle := ui.Box(c.Key("j-rec-stop")).Size(42, 42).Radius(21).Center().
+										LinearGradient(ui.LinearGradient{From: ui.Hex("#EF4444"), To: ui.Hex("#DC2626"), Angle: 180}).
+										InsetShadow(0, 1, 0, 0, ui.RGBA(255, 255, 255, 0.35)).
+										Shadow(0, 4, 12, 0, t.Danger.Alpha(0.4)).
+										Role(ui.RoleButton).Label("停止录音")
+									stopCircle.Children(func() {
+										ui.Icon(c, iconStop).FontSize(17).TextColor(ui.RGB(255, 255, 255))
+									})
+									if stopCircle.Clicked() {
+										a.stopJournalRecording()
+									}
 								})
-								if stopCircle.Clicked() {
-									a.stopJournalRecording()
-								}
 
 								ui.Column(c).Grow(1).Gap(6).Children(func() {
 									ui.Textf(c, "正在录音 %s", formatDuration(recStatus.Elapsed)).FontSize(14).FontWeight(600).TextColor(t.Danger)
@@ -785,13 +840,11 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 						})
 					})
 
-					minimalDivider(c, t)
-
-					// 5. 观察笔记
-					ui.Column(c).FillWidth().Gap(8).Children(func() {
-						ui.Text(c, "观察笔记").FontSize(12.5).FontWeight(600).TextColor(t.TextMuted)
+					// 5. 观察笔记卡片
+					tactileCard(c, t).Padding(13).Gap(6).Children(func() {
+						ui.Text(c, "观察笔记").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
 						minimalTextArea(c, "j-obs-notes", &a.jDraftNotes,
-							"记录生境、羽色、鸣叫或行为特征…", "文字记录", 96, t)
+							"记录生境、羽色、鸣叫或行为特征…", "文字记录", 80, t)
 					})
 
 					if a.jDraftError != "" {

@@ -17,7 +17,7 @@
       "foreground": "resources/icon-foreground.png",
       "background": "#0284C7"
     },
-    "splash": "#FFFFFF"
+    "splash": "#F3F5F9"
   },
   "ios": {
     "orientations": [
