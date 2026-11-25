@@ -434,7 +434,7 @@ func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme) bool {
 }
 
 func circleIconBtn(c *ui.Context, key any, label string, svg *ui.SVG, bg, fg ui.Color, size float32) ui.Element {
-	return ui.Box(c.Key(key)).Size(size, size).Radius(size/2).Background(bg).Center().Shrink(0).
+	return ui.Box(c.Key(key)).Size(size, size).Radius(size / 2).Background(bg).Center().Shrink(0).
 		Role(ui.RoleButton).Label(label).Children(func() {
 		ui.Icon(c, svg).FontSize(size * 0.46).TextColor(fg)
 	})
@@ -469,6 +469,47 @@ func statusPill(c *ui.Context, text string, bg, fg ui.Color) {
 	ui.Row(c).Height(24).PaddingX(10).Radius(12).Background(bg).
 		AlignItems(ui.Center).Justify(ui.Center).Shrink(0).Children(func() {
 		ui.Text(c, text).FontSize(11).FontWeight(500).TextColor(fg).SingleLine()
+	})
+}
+
+type metaItem struct {
+	Text   string
+	Color  ui.Color // 零值默认 secondaryTextColor(t)
+	Weight int      // 零值默认 400
+	Tnum   bool
+}
+
+// metaAnnotationRow 以无左内边距的纯排版行展示标注类元信息，使首字与上方标题、正文严格对齐在同一垂直视觉轴线（Optical Alignment）。
+func metaAnnotationRow(c *ui.Context, t *ui.Theme, items ...metaItem) {
+	var valid []metaItem
+	for _, it := range items {
+		if strings.TrimSpace(it.Text) != "" {
+			valid = append(valid, it)
+		}
+	}
+	if len(valid) == 0 {
+		return
+	}
+	ui.Row(c).FillWidth().Gap(8).Wrap().AlignItems(ui.Center).Padding(2, 0, 0, 0).Children(func() {
+		for i, it := range valid {
+			col := it.Color
+			if col == (ui.Color{}) {
+				col = secondaryTextColor(t)
+			}
+			w := it.Weight
+			if w == 0 {
+				w = 400
+			}
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				el := ui.Text(c, it.Text).FontSize(13).FontWeight(w).TextColor(col)
+				if it.Tnum {
+					el.FontFeatures("tnum")
+				}
+				if i < len(valid)-1 {
+					ui.Box(c).Width(1).Height(10).Radius(0.5).Background(t.TextMuted.Alpha(0.28)).Shrink(0)
+				}
+			})
+		}
 	})
 }
 

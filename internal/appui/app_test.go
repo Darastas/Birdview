@@ -446,3 +446,70 @@ func TestPhotoLightboxContainAndReset(t *testing.T) {
 		t.Fatalf("expected lightbox page reset to 0, open=%v page=%d texts=%q", app.zoomOpen, app.zoomPager.Page, tt.Texts())
 	}
 }
+
+func TestFieldCommentUnescapeAndColorSwatch(t *testing.T) {
+	// 1. HTML 实体先解码为中文逗号，绝不误判为色号
+	plainSegs := parseCommentColorSegments(api.CleanEBirdText("黑身&#xff0c;头灰白"))
+	if len(plainSegs) != 1 || plainSegs[0].HasColor || plainSegs[0].Text != "黑身，头灰白" {
+		t.Fatalf("expected plain unescaped segment without color swatch, got %+v", plainSegs)
+	}
+
+	// 2. 真实十六进制色号提取与 RGB 转换
+	colorSegs := parseCommentColorSegments("背羽 #2F4F4F，头顶 #FFF")
+	var swatches []commentSegment
+	for _, s := range colorSegs {
+		if s.HasColor {
+			swatches = append(swatches, s)
+		}
+	}
+	if len(swatches) != 2 ||
+		swatches[0].Text != "#2F4F4F" || swatches[0].Color != ui.RGB(0x2F, 0x4F, 0x4F) ||
+		swatches[1].Text != "#FFF" || swatches[1].Color != ui.RGB(255, 255, 255) {
+		t.Fatalf("unexpected parsed color swatches: %+v", swatches)
+	}
+
+	// 3. 清单详情页渲染含 HTML 实体 + 真实色号混合备注无异常，且文本解码显示
+	app := newTestAppState(t)
+	app.regObsList = []model.Observation{
+		{
+			SpeciesCode: "hoopoe",
+			ComName:     "戴胜",
+			SciName:     "Upupa epops",
+			LocName:     "翠湖湿地",
+			ObsDt:       "2026-11-25 10:15",
+			HowMany:     1,
+			SubID:       "S888001",
+		},
+	}
+	app.regChecklistMap["S888001"] = &model.ChecklistDetail{
+		SubID:           "S888001",
+		UserDisplayName: "tester",
+		NumSpecies:      1,
+		Obs: []model.ChecklistObs{
+			{
+				SpeciesCode: "hoopoe",
+				Comments:    "黑身&#xff0c;头灰白，冠羽 #D97706，腹羽 #FFFFFF",
+			},
+		},
+	}
+	tt := ui.NewTester(app.View, 402, 844)
+	if err := tt.Click("探索"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("近期目击"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("戴胜"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 600*time.Millisecond)
+	if !tt.HasText("黑身，头灰白") || !tt.HasText("#D97706") || !tt.HasText("#FFFFFF") {
+		t.Fatalf("expected decoded comment and swatch labels visible, texts=%q", tt.Texts())
+	}
+	if tt.HasText("&#xff0c;") {
+		t.Fatalf("expected raw html entity unescaped, texts=%q", tt.Texts())
+	}
+	if img := tt.Image(); img.Bounds().Dx() != 402 {
+		t.Fatalf("unexpected checklist comment swatch render bounds: %v", img.Bounds())
+	}
+}

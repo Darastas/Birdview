@@ -126,3 +126,34 @@ func TestFetchSpeciesThumbExactMatch(t *testing.T) {
 		t.Fatalf("expected exact species match thumb, got %q", got)
 	}
 }
+
+func TestCleanEBirdTextAndChecklistUnescape(t *testing.T) {
+	raw := "黑身&#xff0c;头灰白&#xff0c;腹部腋下白&#xff0c;长嘴长尾&#xff0c;有照片"
+	want := "黑身，头灰白，腹部腋下白，长嘴长尾，有照片"
+	if got := CleanEBirdText(raw); got != want {
+		t.Fatalf("CleanEBirdText mismatch: got %q want %q", got, want)
+	}
+	if got := CleanEBirdText("A&amp;#xff0c;B&lt;br/&gt;C"); got != "A，B\nC" {
+		t.Fatalf("double-escaped br decode mismatch: got %q", got)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/product/checklist/view/S2":
+			w.Write([]byte(`{"subId":"S2","userDisplayName":"观鸟人&amp;队友","numSpecies":1,"obs":[{"speciesCode":"bludro1","comName":"黑卷尾&#xff08;普通&#xff09;","comments":"黑身&#xff0c;头灰白&#xff0c;腹部腋下白&#xff0c;长嘴长尾&#xff0c;有照片"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient()
+	c.EBirdBaseURL = srv.URL
+	detail, err := c.FetchChecklistDetail(context.Background(), "test-key", "S2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.UserDisplayName != "观鸟人&队友" || len(detail.Obs) != 1 || detail.Obs[0].Comments != want {
+		t.Fatalf("unexpected unescaped checklist detail: %+v", detail)
+	}
+}

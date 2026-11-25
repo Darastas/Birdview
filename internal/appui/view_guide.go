@@ -878,14 +878,14 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 					ui.Text(c, tx.ComName).FontSize(24).FontWeight(600).LetterSpacing(-0.1)
 					ui.Text(c, tx.SciName).FontSize(14).Italic().TextColor(t.TextMuted)
 
-					ui.Row(c).Gap(6).Wrap().Padding(2, 0, 0, 0).AlignItems(ui.Center).Children(func() {
-						if taxLine := model.FormatTaxonLine(tx); taxLine != "" {
-							statusPill(c, taxLine, softPillColor(t), secondaryTextColor(t))
-						}
-						if media != nil && media.INatObservationsCount > 0 {
-							statusPill(c, fmt.Sprintf("%d 条社区观测", media.INatObservationsCount), optA.Alpha(0.12), optA)
-						}
-					})
+					var meta []metaItem
+					if taxLine := model.FormatTaxonLine(tx); taxLine != "" {
+						meta = append(meta, metaItem{Text: taxLine, Weight: 500})
+					}
+					if media != nil && media.INatObservationsCount > 0 {
+						meta = append(meta, metaItem{Text: fmt.Sprintf("%d 条社区观测", media.INatObservationsCount), Color: optA, Weight: 500, Tnum: true})
+					}
+					metaAnnotationRow(c, t, meta...)
 
 					if count > 0 {
 						idx := max(0, min(a.guideGallery.Page, count-1))

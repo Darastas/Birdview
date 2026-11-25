@@ -759,19 +759,20 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 
 		ui.Scroll(c.Key("ec-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
 			ui.Column(c).FillWidth().Padding(6, 18, 44, 18).Gap(14).Children(func() {
-				tactileCard(c, t).Padding(16).Gap(8).Children(func() {
+				tactileCard(c, t).Padding(16).Gap(6).Children(func() {
 					ui.Text(c, obs.ComName).FontSize(22).FontWeight(600).LetterSpacing(-0.1)
 					ui.Text(c, obs.SciName).FontSize(14).Italic().TextColor(t.TextMuted)
-					ui.Row(c).Gap(6).Wrap().Padding(4, 0, 0, 0).Children(func() {
-						statusPill(c, model.FormatObsTime(obs.ObsDt), softPillColor(t), secondaryTextColor(t))
-						statusPill(c, fallbackText(obs.LocName, "未命名地点"), softPillColor(t), secondaryTextColor(t))
-						if obs.HowMany > 0 {
-							statusPill(c, fmt.Sprintf("%d 只", obs.HowMany), softPillColor(t), t.Text)
-						}
-						if obs.UserDisplayName != "" {
-							statusPill(c, obs.UserDisplayName, softPillColor(t), t.TextMuted)
-						}
-					})
+					items := []metaItem{
+						{Text: model.FormatObsTime(obs.ObsDt), Tnum: true},
+						{Text: fallbackText(obs.LocName, "未命名地点")},
+					}
+					if obs.HowMany > 0 {
+						items = append(items, metaItem{Text: fmt.Sprintf("%d 只", obs.HowMany), Color: t.Text, Weight: 500, Tnum: true})
+					}
+					if obs.UserDisplayName != "" {
+						items = append(items, metaItem{Text: obs.UserDisplayName, Color: t.TextMuted})
+					}
+					metaAnnotationRow(c, t, items...)
 				})
 
 				// 严格隔离卡片：绝不在此处加载图鉴通用物种照
@@ -810,23 +811,23 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 					if checklist == nil {
 						ui.Text(c, "暂无该清单详细信息。").FontSize(13).TextColor(t.TextMuted)
 					} else {
-						ui.Row(c).Gap(6).Wrap().Children(func() {
-							if checklist.UserDisplayName != "" {
-								statusPill(c, "作者："+checklist.UserDisplayName, softPillColor(t), secondaryTextColor(t))
-							}
-							if checklist.DurationHrs > 0 {
-								statusPill(c, fmt.Sprintf("%.1f 小时", checklist.DurationHrs), softPillColor(t), secondaryTextColor(t))
-							}
-							if checklist.EffortDistanceKm > 0 {
-								statusPill(c, fmt.Sprintf("%.2f km", checklist.EffortDistanceKm), softPillColor(t), secondaryTextColor(t))
-							}
-							statusPill(c, fmt.Sprintf("共 %d 种", checklist.NumSpecies), softPillColor(t), t.Text)
-						})
+						items := []metaItem{}
+						if checklist.UserDisplayName != "" {
+							items = append(items, metaItem{Text: "作者：" + checklist.UserDisplayName})
+						}
+						if checklist.DurationHrs > 0 {
+							items = append(items, metaItem{Text: fmt.Sprintf("%.1f 小时", checklist.DurationHrs), Tnum: true})
+						}
+						if checklist.EffortDistanceKm > 0 {
+							items = append(items, metaItem{Text: fmt.Sprintf("%.2f km", checklist.EffortDistanceKm), Tnum: true})
+						}
+						items = append(items, metaItem{Text: fmt.Sprintf("共 %d 种", checklist.NumSpecies), Color: t.Text, Weight: 500, Tnum: true})
+						metaAnnotationRow(c, t, items...)
 
-						if matchedItem != nil && strings.TrimSpace(matchedItem.Comments) != "" {
+						if matchedItem != nil && strings.TrimSpace(api.CleanEBirdText(matchedItem.Comments)) != "" {
 							tactileRecessedStyle(ui.Column(c).FillWidth().Padding(12).Gap(4), t, 12).Children(func() {
 								ui.Text(c, "现场记录备注").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
-								ui.Text(c, matchedItem.Comments).FontSize(14).LineHeight(1.5)
+								renderFieldComment(c, matchedItem.Comments, t)
 							})
 						}
 
@@ -1050,5 +1051,135 @@ func metricMiniCard(c *ui.Context, t *ui.Theme, label, val string) {
 	ui.Column(c).Grow(1).Basis(0).AlignItems(ui.Center).Gap(2).Children(func() {
 		ui.Text(c, val).FontSize(20).FontWeight(600).FontFeatures("tnum")
 		ui.Text(c, label).FontSize(12).TextColor(t.TextMuted)
+	})
+}
+
+type commentSegment struct {
+	Text     string
+	HasColor bool
+	Color    ui.Color
+}
+
+func isASCIIAlphaNum(b byte) bool {
+	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+func parseHexNibble(b byte) (uint8, bool) {
+	switch {
+	case b >= '0' && b <= '9':
+		return b - '0', true
+	case b >= 'a' && b <= 'f':
+		return b - 'a' + 10, true
+	case b >= 'A' && b <= 'F':
+		return b - 'A' + 10, true
+	default:
+		return 0, false
+	}
+}
+
+func parseHexColorToken(s string) (ui.Color, bool) {
+	switch len(s) {
+	case 3:
+		r, ok1 := parseHexNibble(s[0])
+		g, ok2 := parseHexNibble(s[1])
+		b, ok3 := parseHexNibble(s[2])
+		if !ok1 || !ok2 || !ok3 {
+			return ui.Color{}, false
+		}
+		return ui.RGB(r*17, g*17, b*17), true
+	case 6:
+		var vals [6]uint8
+		for i := range 6 {
+			v, ok := parseHexNibble(s[i])
+			if !ok {
+				return ui.Color{}, false
+			}
+			vals[i] = v
+		}
+		return ui.RGB(vals[0]<<4|vals[1], vals[2]<<4|vals[3], vals[4]<<4|vals[5]), true
+	default:
+		return ui.Color{}, false
+	}
+}
+
+// parseCommentColorSegments 识别独立标准十六进制色号（#RGB / #RRGGBB），避免误伤 HTML 实体或普通编号。
+func parseCommentColorSegments(text string) []commentSegment {
+	var out []commentSegment
+	last := 0
+	for i := 0; i < len(text); i++ {
+		if text[i] != '#' {
+			continue
+		}
+		if i > 0 && (isASCIIAlphaNum(text[i-1]) || text[i-1] == '&') {
+			continue
+		}
+		j := i + 1
+		for j < len(text) && isASCIIAlphaNum(text[j]) {
+			j++
+		}
+		hexLen := j - (i + 1)
+		if hexLen != 3 && hexLen != 6 {
+			i = j - 1
+			continue
+		}
+		col, ok := parseHexColorToken(text[i+1 : j])
+		if !ok {
+			i = j - 1
+			continue
+		}
+		if i > last {
+			out = append(out, commentSegment{Text: text[last:i]})
+		}
+		out = append(out, commentSegment{Text: text[i:j], HasColor: true, Color: col})
+		last = j
+		i = j - 1
+	}
+	if last < len(text) {
+		out = append(out, commentSegment{Text: text[last:]})
+	}
+	return out
+}
+
+// renderFieldComment 自动解码 HTML 实体并在存在真实色号时渲染与正文字号等高（14px）、带边框的圆形色块。
+func renderFieldComment(c *ui.Context, raw string, t *ui.Theme) {
+	clean := api.CleanEBirdText(raw)
+	segs := parseCommentColorSegments(clean)
+	hasColor := false
+	for _, s := range segs {
+		if s.HasColor {
+			hasColor = true
+			break
+		}
+	}
+	if !hasColor {
+		ui.Text(c, clean).FontSize(14).LineHeight(1.5)
+		return
+	}
+
+	swatchBorder := ui.RGBA(15, 23, 42, 0.24)
+	if t.Dark {
+		swatchBorder = ui.RGBA(255, 255, 255, 0.36)
+	}
+
+	lines := strings.Split(strings.ReplaceAll(clean, "\r\n", "\n"), "\n")
+	ui.Column(c).FillWidth().Gap(4).Children(func() {
+		for _, line := range lines {
+			lineSegs := parseCommentColorSegments(line)
+			if len(lineSegs) == 0 {
+				continue
+			}
+			ui.Row(c).FillWidth().Gap(4).Wrap().AlignItems(ui.Center).Children(func() {
+				for _, seg := range lineSegs {
+					if seg.HasColor {
+						ui.Row(c).Gap(4).AlignItems(ui.Center).Shrink(0).Children(func() {
+							ui.Box(c).Size(14, 14).Radius(7).Background(seg.Color).Border(1, swatchBorder).Shrink(0)
+							ui.Text(c, seg.Text).FontSize(14).TextColor(secondaryTextColor(t)).FontFeatures("tnum")
+						})
+					} else if seg.Text != "" {
+						ui.Text(c, seg.Text).FontSize(14).LineHeight(1.5)
+					}
+				}
+			})
+		}
 	})
 }
