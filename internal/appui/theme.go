@@ -252,6 +252,7 @@ func minimalSearchBar(c *ui.Context, key string, query *string, placeholder, lab
 			if clr.Clicked() {
 				*query = ""
 				changed = true
+				triggerHapticTap()
 			}
 		}
 	})
@@ -385,6 +386,7 @@ func renderSegmentItems(c *ui.Context, strip ui.Element, key string, selected *i
 			if item.Clicked() && !active {
 				*selected = i
 				changed = true
+				triggerHapticTap()
 			}
 		}
 	})
@@ -587,6 +589,7 @@ func externalLinkChip(c *ui.Context, key, label string, icon *ui.SVG, url string
 		ui.Icon(c, iconExternalLink).FontSize(12).TextColor(t.TextMuted)
 	})
 	if chip.Clicked() {
+		triggerHapticTap()
 		_ = mygo.Shell.OpenExternal(url)
 	}
 }

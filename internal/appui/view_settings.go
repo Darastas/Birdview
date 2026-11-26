@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
 	"github.com/egoist/mygo/ui/netimage"
@@ -66,7 +67,7 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 					// 1. 数据接口与密钥（合并入口）
 					tactileCard(c, t).Clip().Children(func() {
 						keyStatus := apiKeysStatusSummary(a.store.LoadEbirdKey(), a.store.LoadXenoKey())
-						if settingsRow(c, "set-row-api-keys", "数据源密钥", keyStatus, t, nil).Clicked() {
+						if hapticClick(settingsRow(c, "set-row-api-keys", "数据源密钥", keyStatus, t, nil)) {
 							a.syncSettingsDraft()
 							a.setVerifyMsg = ""
 							a.setKeySheetOpen = true
@@ -75,7 +76,7 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 
 					// 2. 偏好设置
 					tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
-						if settingsRow(c, "set-row-region", "默认观鸟区域", regionShortNameByCode(a.store.Settings().DefaultRegion), t, nil).Clicked() {
+						if hapticClick(settingsRow(c, "set-row-region", "默认观鸟区域", regionShortNameByCode(a.store.Settings().DefaultRegion), t, nil)) {
 							a.regRegionTarget = "settings"
 							a.regRegionQuery = ""
 							a.regRegionSheetOpen = true
@@ -96,6 +97,16 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 								a.saveThemePreferenceOnly(c, themeModeFromLabel(a.setThemeMode))
 							}
 						})
+
+						hapticsOn := a.hapticsEnabled()
+						ui.Row(c.Key("set-row-haptics")).FillWidth().Padding(11, 16).Gap(12).
+							Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+							ui.Text(c, "按键震动").FontSize(15).FontWeight(500).Shrink(0)
+							sw := mobile.Switch(c.Key("set-haptics-sw"), &hapticsOn).Label("按键震动开关")
+							if sw.Changed() {
+								a.saveHapticsPreferenceOnly(hapticsOn)
+							}
+						})
 					})
 
 					// 3. 存储与备份
@@ -109,13 +120,14 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 							clrBtn.Children(func() {
 								ui.Text(c, "清理").FontSize(13).FontWeight(500).TextColor(t.Text)
 							})
-							if clrBtn.Clicked() {
+							if hapticClick(clrBtn) {
 								if a.cache != nil {
 									_ = a.cache.Clear()
 								}
 								netimage.Clear()
 								a.thumbMap = make(map[string]string)
 								a.thumbTried = make(map[string]bool)
+								a.thumbFailAt = make(map[string]time.Time)
 								a.localImgCache = make(map[string]ui.ImageSource)
 								a.localImgOrder = nil
 								a.refreshStorageStats()
@@ -123,14 +135,14 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 							}
 						})
 
-						if settingsRow(c, "set-row-export", "日志导出与备份", formatBytes(a.localDataBytes), t, nil).Clicked() {
+						if hapticClick(settingsRow(c, "set-row-export", "日志导出与备份", formatBytes(a.localDataBytes), t, nil)) {
 							a.exportSheetOpen = true
 						}
 					})
 
 					// 4. 关于
 					tactileCard(c, t).Clip().Children(func() {
-						if settingsRow(c, "set-row-about", "关于 Birdview", "v2.0.0", t, nil).Clicked() {
+						if hapticClick(settingsRow(c, "set-row-about", "关于 Birdview", "v1.0.0", t, nil)) {
 							a.setAboutSheetOpen = true
 						}
 					})
@@ -153,18 +165,18 @@ func (a *AppState) viewSettingsKeySheet(c *ui.Context, t *ui.Theme) {
 					Role(ui.RoleButton).Label("取消").Children(func() {
 					ui.Text(c, "取消").FontSize(15).TextColor(t.TextMuted)
 				})
-				if cancelBtn.Clicked() {
+				if hapticClick(cancelBtn) {
 					a.setKeySheetOpen = false
 				}
 				ui.Text(c, "数据源密钥").FontSize(16).FontWeight(600)
-				if filterPill(c, "sk-save", "保存设置", true, t).Clicked() {
+				if hapticClick(filterPill(c, "sk-save", "保存设置", true, t)) {
 					a.saveKeysFromUI(c)
 				}
 			})
 			minimalDivider(c, t)
 
 			ui.Scroll(c.Key("sk-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
-				ui.Column(c).FillWidth().Padding(14, 18, 32, 18).Gap(14).Children(func() {
+				ui.Column(c).FillWidth().Padding(14, 18, 36, 18).Gap(14).Children(func() {
 					tactileCard(c, t).Padding(16).Gap(12).Children(func() {
 						ui.Column(c).FillWidth().Gap(8).Children(func() {
 							ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
@@ -198,8 +210,8 @@ func (a *AppState) viewSettingsKeySheet(c *ui.Context, t *ui.Theme) {
 					})
 
 					ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-						if monochromeButton(c, "verify-key-btn", "测试 eBird 连接", false, t).
-							Height(40).Radius(20).Disabled(a.setVerifyBusy).Clicked() {
+						if hapticClick(monochromeButton(c, "verify-key-btn", "测试 eBird 连接", false, t).
+							Height(40).Radius(20).Disabled(a.setVerifyBusy)) {
 							a.verifyEbirdKeyAsync()
 						}
 						if a.setVerifyBusy {
@@ -229,17 +241,17 @@ func (a *AppState) viewSettingsAboutSheet(c *ui.Context, t *ui.Theme) {
 		ui.Column(c).Fill().Children(func() {
 			ui.Row(c).FillWidth().Padding(8, 20, 14, 20).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "关于 Birdview").FontSize(16).FontWeight(600)
-				if filterPill(c, "ab-close", "关闭", false, t).Clicked() {
+				if hapticClick(filterPill(c, "ab-close", "关闭", false, t)) {
 					a.setAboutSheetOpen = false
 				}
 			})
 			minimalDivider(c, t)
 
 			ui.Scroll(c.Key("ab-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
-				ui.Column(c).FillWidth().Padding(14, 18, 32, 18).Gap(14).Children(func() {
+				ui.Column(c).FillWidth().Padding(14, 18, 36, 18).Gap(14).Children(func() {
 					tactileCard(c, t).Padding(16).Gap(4).Children(func() {
 						ui.Text(c, "Birdview").FontSize(16).FontWeight(600)
-						ui.Text(c, "版本 v2.0.0").FontSize(13).TextColor(t.TextMuted)
+						ui.Text(c, "版本 v1.0.0").FontSize(13).TextColor(t.TextMuted)
 					})
 
 					tactileCard(c, t).Padding(16).Gap(10).Children(func() {
@@ -316,6 +328,16 @@ func (a *AppState) saveThemePreferenceOnly(c *ui.Context, mode string) {
 	_ = a.store.SaveSettings(cfg)
 	if a.win != nil {
 		ApplyThemeSource(mode)
+	}
+}
+
+func (a *AppState) saveHapticsPreferenceOnly(enabled bool) {
+	cfg := a.store.Settings()
+	cfg.HapticsDisabled = !enabled
+	_ = a.store.SaveSettings(cfg)
+	mygo.Haptics.SetEnabled(enabled)
+	if enabled {
+		a.hapticSelection()
 	}
 }
 

@@ -193,6 +193,7 @@ type Settings struct {
 	DefaultRegion   string `json:"defaultRegion"`
 	Locale          string `json:"locale"`
 	ThemeMode       string `json:"themeMode"` // "system", "light", "dark"
+	HapticsDisabled bool   `json:"hapticsDisabled,omitempty"`
 	EbirdKeyBackup  string `json:"ebirdKeyBackup,omitempty"`
 	XenoKeyBackup   string `json:"xenoKeyBackup,omitempty"`
 }

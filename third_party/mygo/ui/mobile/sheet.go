@@ -38,6 +38,9 @@ type sheetState struct {
 	// takes it back to as the window changes.
 	height float32
 	detent int
+	// lastOpenInset keeps the resting bottom offset while open so intermediate
+	// detents also clear bottom system safe areas (home indicator / nav bar).
+	lastOpenInset float32
 }
 
 // Sheet shows a panel coming up from the bottom of the window while *open,
@@ -65,15 +68,21 @@ func Sheet(c *ui.Context, open *bool, o SheetOptions, content func()) {
 	height := winH * tall
 	// The offset's 0 is the tallest detent; closed it is below the window.
 	rest := func(d float32) ui.Point { return ui.Point{Y: height - winH*d} }
+	maxOpenY := float32(0)
+	for _, d := range detents {
+		maxOpenY = max(maxOpenY, rest(d).Y)
+	}
 	closedY := height
 	born := !s.shown
 	if born {
 		s.shown, s.opened = true, false
 		s.offset = ui.Point{Y: closedY}
+		s.lastOpenInset = rest(detents[0]).Y
 	}
 	if s.opened && s.height != height && s.height > 0 {
 		// The window turned: the same detent, in its new height.
 		s.offset = rest(detents[min(s.detent, len(detents)-1)])
+		s.lastOpenInset = max(float32(0), min(s.offset.Y, maxOpenY))
 	}
 	s.height = height
 	points := make([]ui.Point, 0, len(detents)+1)
@@ -85,6 +94,9 @@ func Sheet(c *ui.Context, open *bool, o SheetOptions, content func()) {
 	}
 	if !o.NoDismiss {
 		points = append(points, ui.Point{Y: closedY})
+	}
+	if *open && s.opened && s.offset.Y <= maxOpenY+0.5 {
+		s.lastOpenInset = max(float32(0), s.offset.Y)
 	}
 	t := c.Theme()
 	_, _, bottom, _ := c.SafeArea()
@@ -120,7 +132,7 @@ func Sheet(c *ui.Context, open *bool, o SheetOptions, content func()) {
 				if !o.NoGrabber {
 					ui.Box(c).Width(36).Height(5).Radius(2.5).Background(t.TextMuted.Alpha(0.35)).AlignSelf(ui.Center).Margin(8, 0, 4, 0)
 				}
-				ui.Column(c).Grow(1).Basis(0).Padding(0, 0, bottom, 0).Children(content)
+				ui.Column(c).Grow(1).Basis(0).Padding(0, 0, bottom+s.lastOpenInset, 0).Children(content)
 			})
 		})
 		switch {

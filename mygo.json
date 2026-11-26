@@ -1,7 +1,7 @@
 {
   "name": "Birdview",
   "identifier": "com.darastas.birdview",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "out": "build",
   "icon": "resources/icon.png",
   "android": {
@@ -15,7 +15,7 @@
     ],
     "adaptiveIcon": {
       "foreground": "resources/icon-foreground.png",
-      "background": "#4D9488"
+      "background": "#2A6A6A"
     },
     "splash": "#F7F8FB"
   },

@@ -48,6 +48,9 @@ func (a *AppState) currentExploreRegionCode() (code string, lat, lng float64, is
 func (a *AppState) exploreRegionButtonText() string {
 	custom := strings.TrimSpace(a.regCustomCode)
 	if _, _, isGeo := parseLatLng(custom); isGeo {
+		if strings.TrimSpace(a.regRegionLabel) != "" && !strings.Contains(a.regRegionLabel, "(") {
+			return a.regRegionLabel
+		}
 		return "附近定位"
 	}
 	if custom != "" {
@@ -56,27 +59,76 @@ func (a *AppState) exploreRegionButtonText() string {
 	return regionShortNameByCode(a.regionalRegion)
 }
 
+func (a *AppState) exploreGeoCacheKey() string {
+	code, _, _, _ := a.currentExploreRegionCode()
+	return code + "|" + strings.TrimSpace(a.regCustomCode)
+}
+
+func (a *AppState) exploreObsCacheKey() string {
+	return a.exploreGeoCacheKey() + "|" + a.regBackLabel
+}
+
+// EnsureExploreSubTabLoaded 仅在当前探索子页面在本会话尚未加载、或切换了地区/时间窗口时才触发加载；
+// 已经在「现场实拍 / 近期目击 / 珍稀记录 / 观鸟热点」加载过的内容切换回来直接复用内存缓存，无需重新加载。
+func (a *AppState) EnsureExploreSubTabLoaded() {
+	switch a.session.ExploreSubTab {
+	case 0:
+		key := a.exploreGeoCacheKey()
+		if a.regPhotoBusy || (a.regPhotoLoadedKey == key && a.regPhotoErr == "") {
+			return
+		}
+		a.loadExploreFieldPhotos()
+	case 1:
+		key := a.exploreObsCacheKey()
+		if a.regObsBusy || (a.regObsLoadedKey == key && a.regObsErr == "") {
+			return
+		}
+		a.loadExploreObservations(false)
+	case 2:
+		key := a.exploreObsCacheKey()
+		if a.regNotableBusy || (a.regNotableLoadedKey == key && a.regNotableErr == "") {
+			return
+		}
+		a.loadExploreObservations(true)
+	case 3:
+		key := a.exploreGeoCacheKey()
+		if a.hsBusy || (a.hsLoadedKey == key && a.hsErr == "") {
+			return
+		}
+		a.loadExploreHotspots()
+	}
+}
+
 // resetExploreForRegionChange 切换探索地区时立刻清空旧地区缓存与滚动位置，并使在途旧请求失效，确保界面马上进入灰色骨架卡片加载。
 func (a *AppState) resetExploreForRegionChange() {
 	a.regPhotoSeq++
 	a.regObsSeq++
+	a.regNotableSeq++
 	a.hsSeq++
 	a.regPhotoBusy = false
 	a.regObsBusy = false
+	a.regNotableBusy = false
 	a.hsBusy = false
 	a.regPhotoErr = ""
 	a.regObsErr = ""
+	a.regNotableErr = ""
 	a.hsErr = ""
+	a.regPhotoLoadedKey = ""
+	a.regObsLoadedKey = ""
+	a.regNotableLoadedKey = ""
+	a.hsLoadedKey = ""
 	a.regFieldPhotos = nil
 	a.regObsList = nil
+	a.regNotableList = nil
 	a.regStat = nil
+	a.regStatKey = ""
 	a.hsAll = nil
 	a.hsFiltered = nil
 	a.exploreScroll = [4]ui.ScrollState{}
 	a.LoadExploreData()
 }
 
-// LoadExploreData 根据当前「探索」子分页加载现场实拍、eBird 近期/珍稀记录或观鸟热点。
+// LoadExploreData 强制加载当前选中的「探索」子分页内容（用于首进、下拉刷新或手动重试）。
 func (a *AppState) LoadExploreData() {
 	switch a.session.ExploreSubTab {
 	case 0:
@@ -99,8 +151,10 @@ func (a *AppState) loadExploreFieldPhotos() {
 			lat, lng = opt.Lat, opt.Lng
 		}
 	}
+	cacheKey := a.exploreGeoCacheKey()
 	a.regPhotoSeq++
 	seq := a.regPhotoSeq
+	a.regPhotoLoadedKey = ""
 	a.regFieldPhotos = nil
 	a.regPhotoBusy = true
 	a.regPhotoErr = ""
@@ -123,22 +177,38 @@ func (a *AppState) loadExploreFieldPhotos() {
 				return
 			}
 			a.regFieldPhotos = items
+			a.regPhotoLoadedKey = cacheKey
 		})
 	}()
 }
 
 func (a *AppState) loadExploreObservations(notable bool) {
-	if a.win == nil && len(a.regObsList) > 0 {
-		return
+	if a.win == nil {
+		if notable && len(a.regNotableList) > 0 {
+			return
+		}
+		if !notable && len(a.regObsList) > 0 {
+			return
+		}
 	}
 	regionCode, lat, lng, isGeo := a.currentExploreRegionCode()
+	geoKey := a.exploreGeoCacheKey()
+	obsKey := a.exploreObsCacheKey()
 	key := a.store.LoadEbirdKey()
 	if key == "" {
-		a.regObsSeq++
-		a.regObsBusy = false
-		a.regObsErr = "查询 eBird 观测动态需要配置 API Key，请前往「设置」填入（或切换至免 Key 的“现场实拍”）"
-		a.regObsList = nil
-		a.regStat = nil
+		if notable {
+			a.regNotableSeq++
+			a.regNotableBusy = false
+			a.regNotableErr = "查询 eBird 观测动态需要配置 API Key，请前往「设置」填入（或切换至免 Key 的“现场实拍”）"
+			a.regNotableList = nil
+			a.regNotableLoadedKey = ""
+		} else {
+			a.regObsSeq++
+			a.regObsBusy = false
+			a.regObsErr = "查询 eBird 观测动态需要配置 API Key，请前往「设置」填入（或切换至免 Key 的“现场实拍”）"
+			a.regObsList = nil
+			a.regObsLoadedKey = ""
+		}
 		a.exploreRefresh.Refreshing = false
 		a.invalidateUI()
 		return
@@ -152,12 +222,23 @@ func (a *AppState) loadExploreObservations(notable bool) {
 		backDays = 30
 	}
 
-	a.regObsSeq++
-	seq := a.regObsSeq
-	a.regObsList = nil
-	a.regStat = nil
-	a.regObsBusy = true
-	a.regObsErr = ""
+	var seq uint64
+	if notable {
+		a.regNotableSeq++
+		seq = a.regNotableSeq
+		a.regNotableList = nil
+		a.regNotableLoadedKey = ""
+		a.regNotableBusy = true
+		a.regNotableErr = ""
+	} else {
+		a.regObsSeq++
+		seq = a.regObsSeq
+		a.regObsList = nil
+		a.regObsLoadedKey = ""
+		a.regObsBusy = true
+		a.regObsErr = ""
+	}
+	needStat := a.regStat == nil || a.regStatKey != geoKey
 	a.invalidateUI()
 
 	go func() {
@@ -168,7 +249,7 @@ func (a *AppState) loadExploreObservations(notable bool) {
 			stat    *model.RegionStat
 			statErr error
 		)
-		wg.Add(2)
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 28*time.Second)
@@ -179,30 +260,48 @@ func (a *AppState) loadExploreObservations(notable bool) {
 			}
 			cancel()
 		}()
-		go func() {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-			stat, statErr = a.client.FetchRegionStats(ctx, key, regionCode, time.Now().AddDate(0, 0, -1))
-			cancel()
-		}()
+		if needStat {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+				stat, statErr = a.client.FetchRegionStats(ctx, key, regionCode, time.Now().AddDate(0, 0, -1))
+				cancel()
+			}()
+		}
 		wg.Wait()
 
 		a.updateUI(func() {
-			if seq != a.regObsSeq {
-				return
-			}
-			a.regObsBusy = false
-			a.exploreRefresh.Refreshing = false
-			if err != nil {
-				a.regObsErr = fmt.Sprintf("加载观测记录失败: %v", err)
-				a.regObsList = nil
-				return
-			}
-			a.regObsList = obs
-			if statErr == nil {
-				a.regStat = stat
+			if notable {
+				if seq != a.regNotableSeq {
+					return
+				}
+				a.regNotableBusy = false
+				a.exploreRefresh.Refreshing = false
+				if err != nil {
+					a.regNotableErr = fmt.Sprintf("加载观测记录失败: %v", err)
+					a.regNotableList = nil
+					return
+				}
+				a.regNotableList = obs
+				a.regNotableLoadedKey = obsKey
 			} else {
-				a.regStat = nil
+				if seq != a.regObsSeq {
+					return
+				}
+				a.regObsBusy = false
+				a.exploreRefresh.Refreshing = false
+				if err != nil {
+					a.regObsErr = fmt.Sprintf("加载观测记录失败: %v", err)
+					a.regObsList = nil
+					return
+				}
+				a.regObsList = obs
+				a.regObsLoadedKey = obsKey
+			}
+			if needStat && statErr == nil && stat != nil {
+				a.regStat = stat
+				a.regStatKey = geoKey
 			}
 		})
 	}()
@@ -213,6 +312,7 @@ func (a *AppState) loadExploreHotspots() {
 		return
 	}
 	regionCode, _, _, _ := a.currentExploreRegionCode()
+	geoKey := a.exploreGeoCacheKey()
 	key := a.store.LoadEbirdKey()
 	if key == "" {
 		a.hsSeq++
@@ -220,6 +320,7 @@ func (a *AppState) loadExploreHotspots() {
 		a.hsErr = "查询观鸟热点需要配置 eBird API Key，请前往「设置」填写"
 		a.hsAll = nil
 		a.hsFiltered = nil
+		a.hsLoadedKey = ""
 		a.exploreRefresh.Refreshing = false
 		a.invalidateUI()
 		return
@@ -229,6 +330,7 @@ func (a *AppState) loadExploreHotspots() {
 	seq := a.hsSeq
 	a.hsAll = nil
 	a.hsFiltered = nil
+	a.hsLoadedKey = ""
 	a.hsBusy = true
 	a.hsErr = ""
 	a.invalidateUI()
@@ -251,6 +353,7 @@ func (a *AppState) loadExploreHotspots() {
 				return
 			}
 			a.hsAll = list
+			a.hsLoadedKey = geoKey
 			a.applyHotspotFilterAndSort()
 		})
 	}()
@@ -348,7 +451,7 @@ func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 					ui.Icon(c, iconMapPin).FontSize(13).TextColor(opticalAccentColor(t))
 					ui.Text(c, a.exploreRegionButtonText()).FontSize(13).FontWeight(500).SingleLine()
 				})
-				if locBtn.Clicked() {
+				if hapticClick(locBtn) {
 					a.regRegionTarget = "explore"
 					a.regGPSNote = ""
 					a.regRegionSheetOpen = true
@@ -356,8 +459,7 @@ func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 			})
 
 			if tactileSegmentedControl(c, "exp-seg", &a.session.ExploreSubTab, t, "现场实拍", "近期目击", "珍稀记录", "观鸟热点") {
-				a.exploreScroll[a.session.ExploreSubTab].Y = 0
-				a.LoadExploreData()
+				a.EnsureExploreSubTabLoaded()
 			}
 		})
 
@@ -390,7 +492,7 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 	if a.regPhotoErr != "" {
 		tactileCard(c, t).Padding(18).Gap(12).Children(func() {
 			ui.Text(c, a.regPhotoErr).FontSize(13).TextColor(t.Danger)
-			if filterPill(c, "fp-retry", "重新加载", false, t).Clicked() {
+			if hapticClick(filterPill(c, "fp-retry", "重新加载", false, t)) {
 				a.loadExploreFieldPhotos()
 			}
 		})
@@ -463,7 +565,7 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 						FontSize(12).TextColor(secondaryTextColor(t)).SingleLine()
 				})
 			})
-			if card.Clicked() {
+			if hapticClick(card) {
 				a.regActivePhoto = &obsItem
 				a.regPhotoPager = mobile.PageState{}
 				a.router.Push(fmt.Sprintf("/explore/photo/%d", obsItem.ID))
@@ -473,7 +575,17 @@ func (a *AppState) buildExplorePhotoFeed(c *ui.Context, t *ui.Theme) {
 }
 
 func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
-	if a.regObsBusy {
+	notable := a.session.ExploreSubTab == 2
+	obsBusy := a.regObsBusy
+	obsErr := a.regObsErr
+	obsList := a.regObsList
+	if notable {
+		obsBusy = a.regNotableBusy
+		obsErr = a.regNotableErr
+		obsList = a.regNotableList
+	}
+
+	if obsBusy {
 		skeletonObsStatsCard(c, t)
 	} else if a.regStat != nil {
 		tactileCard(c, t).Padding(14, 8).Children(func() {
@@ -496,37 +608,39 @@ func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
 		}
 		if tactileCompactSegment(c, "obs-back-seg", &backIdx, t, backOpts...) {
 			a.regBackLabel = backOpts[backIdx]
+			a.regObsLoadedKey = ""
+			a.regNotableLoadedKey = ""
 			a.LoadExploreData()
 		}
-		if !a.regObsBusy && len(a.regObsList) > 0 {
-			ui.Textf(c, "%d 条记录", len(a.regObsList)).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
+		if !obsBusy && len(obsList) > 0 {
+			ui.Textf(c, "%d 条记录", len(obsList)).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
 		}
 	})
 
-	if a.regObsErr != "" {
+	if obsErr != "" {
 		tactileCard(c, t).Padding(18).Gap(12).Children(func() {
-			ui.Text(c, a.regObsErr).FontSize(13).TextColor(t.Danger)
+			ui.Text(c, obsErr).FontSize(13).TextColor(t.Danger)
 			if a.store.LoadEbirdKey() == "" {
-				if filterPill(c, "obs-goto-set", "前往设置 Key", true, t).Clicked() {
-					a.SelectTab(3)
+				if hapticClick(filterPill(c, "obs-goto-set", "前往设置 Key", true, t)) {
+					a.SelectTab(4)
 				}
 			}
 		})
 		return
 	}
 
-	if a.regObsBusy {
+	if obsBusy {
 		skeletonObsListCard(c, 6, t)
 		return
 	}
 
-	if len(a.regObsList) == 0 {
+	if len(obsList) == 0 {
 		tactileCard(c, t).Padding(32).Center().Gap(10).Children(func() {
 			tactileRecessedStyle(ui.Box(c).Size(52, 52), t, 26).Center().Children(func() {
 				ui.Icon(c, iconGlobe).FontSize(22).TextColor(t.TextMuted)
 			})
 			ui.Text(c, "近期暂无公开观测记录").FontSize(15).FontWeight(600)
-			if filterPill(c, "obs-load-now", "刷新尝试", false, t).Clicked() {
+			if hapticClick(filterPill(c, "obs-load-now", "刷新尝试", false, t)) {
 				a.LoadExploreData()
 			}
 		})
@@ -534,7 +648,7 @@ func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
 	}
 
 	tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
-		for i, o := range a.regObsList {
+		for i, o := range obsList {
 			obs := o
 			row := ui.Row(c.Key(fmt.Sprintf("ebobs-%s-%d", obs.SubID, i))).
 				FillWidth().Padding(13, 16).Gap(12).AlignItems(ui.Center).
@@ -559,7 +673,7 @@ func (a *AppState) buildExploreEbirdObsFeed(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, model.FormatObsTime(obs.ObsDt)).FontSize(12).TextColor(t.TextMuted)
 				})
 			})
-			if row.Clicked() {
+			if hapticClick(row) {
 				a.OpenExploreChecklist(obs)
 			}
 		}
@@ -584,8 +698,8 @@ func (a *AppState) buildExploreHotspotsFeed(c *ui.Context, t *ui.Theme) {
 		tactileCard(c, t).Padding(18).Gap(12).Children(func() {
 			ui.Text(c, a.hsErr).FontSize(13).TextColor(t.Danger)
 			if a.store.LoadEbirdKey() == "" {
-				if filterPill(c, "hs-goto-set", "前往设置 Key", true, t).Clicked() {
-					a.SelectTab(3)
+				if hapticClick(filterPill(c, "hs-goto-set", "前往设置 Key", true, t)) {
+					a.SelectTab(4)
 				}
 			}
 		})
@@ -603,7 +717,7 @@ func (a *AppState) buildExploreHotspotsFeed(c *ui.Context, t *ui.Theme) {
 				ui.Icon(c, iconMapPin).FontSize(22).TextColor(t.TextMuted)
 			})
 			ui.Text(c, "暂无符合条件的观鸟热点").FontSize(15).FontWeight(600)
-			if filterPill(c, "hs-load-now", "刷新尝试", false, t).Clicked() {
+			if hapticClick(filterPill(c, "hs-load-now", "刷新尝试", false, t)) {
 				a.loadExploreHotspots()
 			}
 		})
@@ -630,7 +744,7 @@ func (a *AppState) buildExploreHotspotsFeed(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, "种").FontSize(11).TextColor(t.TextMuted)
 				})
 			})
-			if row.Clicked() {
+			if hapticClick(row) {
 				a.OpenExploreHotspot(spot)
 			}
 		}
@@ -649,7 +763,7 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 		return
 	}
 
-	top, _, _, _ := c.SafeArea()
+	top, _, bottom, _ := c.SafeArea()
 	topBtnY := max(float32(14), top+6)
 	sheetRim := ui.RGBA(255, 255, 255, 0.85)
 	if t.Dark {
@@ -657,7 +771,7 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 	}
 
 	ui.Scroll(c.Key("ep-scroll")).Fill().Scrollbars(false).Children(func() {
-		ui.Column(c).FillWidth().Padding(0, 0, 44, 0).Gap(0).Children(func() {
+		ui.Column(c).FillWidth().Padding(0, 0, max(float32(44), bottom+28), 0).Gap(0).Children(func() {
 			count := len(item.Photos)
 			heroH := float32(330) + top
 			ui.Box(c).FillWidth().Height(heroH).Background(t.Surface).Children(func() {
@@ -676,7 +790,7 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 							skeletonBirdCard(c, 0, 46, t)
 						}
 					})
-					if slide.Clicked() {
+					if hapticClick(slide) {
 						a.openNetworkPhotosViewer(item.ComName+"（现场实拍）", item.Photos, i)
 					}
 				}).Fill()
@@ -687,8 +801,8 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 					Angle: 180,
 				})
 				transitioning := a.router.Transitioning()
-				if liquidGlassCircleBtnFast(c, "ep-back-btn", "返回", iconBack, 38, transitioning).
-					Absolute().Left(16).Top(topBtnY).Clicked() {
+				if hapticClick(liquidGlassCircleBtnFast(c, "ep-back-btn", "返回", iconBack, 38, transitioning).
+					Absolute().Left(16).Top(topBtnY)) {
 					a.goBack()
 				}
 				if count > 0 {
@@ -755,7 +869,7 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 									playBtn.Children(func() {
 										ui.Icon(c, ic).FontSize(15).TextColor(fg)
 									})
-									if playBtn.Clicked() {
+									if hapticClick(playBtn) {
 										if isThis && (st.Playing || st.Loading) {
 											a.player.TogglePause()
 										} else {
@@ -781,10 +895,15 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID string) {
 	obs := a.regSelectedObs
 	if obs == nil || obs.SubID != subID {
-		for i := range a.regObsList {
-			if a.regObsList[i].SubID == subID {
-				copyO := a.regObsList[i]
-				obs = &copyO
+		for _, candidate := range [][]model.Observation{a.regObsList, a.regNotableList} {
+			for i := range candidate {
+				if candidate[i].SubID == subID {
+					copyO := candidate[i]
+					obs = &copyO
+					break
+				}
+			}
+			if obs != nil {
 				break
 			}
 		}
@@ -792,7 +911,7 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 	if obs == nil {
 		ui.Column(c).Fill().Center().Padding(24).Gap(12).Children(func() {
 			ui.Text(c, "未找到该条观测清单")
-			if filterPill(c, "ec-back", "返回探索", false, t).Clicked() {
+			if hapticClick(filterPill(c, "ec-back", "返回探索", false, t)) {
 				a.goBack()
 			}
 		})
@@ -812,19 +931,20 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 		}
 	}
 
+	top, _, bottom, _ := c.SafeArea()
 	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).FillWidth().Padding(immersiveTopPad(c, 14), 18, 10, 18).Gap(10).AlignItems(ui.Center).Children(func() {
-			if tactileIconBtn(c, "ec-back-btn", "返回", iconBack, 36, t).Clicked() {
+		ui.Row(c).FillWidth().Padding(max(float32(14), top+6), 18, 10, 18).Gap(10).AlignItems(ui.Center).Children(func() {
+			if hapticClick(tactileIconBtn(c, "ec-back-btn", "返回", iconBack, 36, t)) {
 				a.goBack()
 			}
 			ui.Text(c, "观鸟清单").FontSize(16).FontWeight(600).SingleLine().Grow(1)
-			if filterPill(c, "ec-goto-guide", "看图鉴", false, t).Clicked() {
+			if hapticClick(filterPill(c, "ec-goto-guide", "看图鉴", false, t)) {
 				a.OpenSpeciesInGuide(obs.SpeciesCode)
 			}
 		})
 
 		ui.Scroll(c.Key("ec-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
-			ui.Column(c).FillWidth().Padding(6, 18, 44, 18).Gap(14).Children(func() {
+			ui.Column(c).FillWidth().Padding(6, 18, max(float32(44), bottom+28), 18).Gap(14).Children(func() {
 				tactileCard(c, t).Padding(16).Gap(6).Children(func() {
 					ui.Text(c, obs.ComName).FontSize(22).FontWeight(600).LetterSpacing(-0.1)
 					ui.Text(c, obs.SciName).FontSize(14).Italic().TextColor(t.TextMuted)
@@ -862,7 +982,7 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 						ui.Text(c, "eBird API v2 仅返回现场媒体计数而不直接暴露图片地址，请点击下方按钮打开原清单查看本次实拍图（不与图鉴通用图混用）。").
 							FontSize(12).TextColor(t.TextMuted).LineHeight(1.5)
 						if obs.SubID != "" {
-							if tactilePrimaryBtn(c, "ec-open-ebird", "打开 eBird 清单原页 ↗", t).FillWidth().Clicked() {
+							if hapticClick(tactilePrimaryBtn(c, "ec-open-ebird", "打开 eBird 清单原页 ↗", t).FillWidth()) {
 								_ = mygo.Shell.OpenExternal("https://ebird.org/checklist/" + obs.SubID)
 							}
 						}
@@ -917,7 +1037,7 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 					}
 				})
 
-				if tactilePrimaryBtn(c, "ec-add-journal", "记入观鸟日志", t).FillWidth().Height(48).Radius(24).Clicked() {
+				if hapticClick(tactilePrimaryBtn(c, "ec-add-journal", "记入观鸟日志", t).FillWidth().Height(48).Radius(24)) {
 					a.OpenNewJournalModal(obs.SpeciesCode, obs.LocName)
 				}
 			})
@@ -939,7 +1059,7 @@ func (a *AppState) viewExploreHotspotDetail(c *ui.Context, t *ui.Theme, locID st
 	if spot == nil {
 		ui.Column(c).Fill().Center().Padding(24).Gap(12).Children(func() {
 			ui.Text(c, "未找到该观鸟热点")
-			if filterPill(c, "es-back", "返回热点", false, t).Clicked() {
+			if hapticClick(filterPill(c, "es-back", "返回热点", false, t)) {
 				a.goBack()
 			}
 		})
@@ -949,16 +1069,17 @@ func (a *AppState) viewExploreHotspotDetail(c *ui.Context, t *ui.Theme, locID st
 	obsList := a.hsObsMap[spot.LocID]
 	busy := a.hsObsBusy[spot.LocID]
 
+	top, _, bottom, _ := c.SafeArea()
 	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).FillWidth().Padding(immersiveTopPad(c, 14), 18, 10, 18).Gap(10).AlignItems(ui.Center).Children(func() {
-			if tactileIconBtn(c, "es-back-btn", "返回", iconBack, 36, t).Clicked() {
+		ui.Row(c).FillWidth().Padding(max(float32(14), top+6), 18, 10, 18).Gap(10).AlignItems(ui.Center).Children(func() {
+			if hapticClick(tactileIconBtn(c, "es-back-btn", "返回", iconBack, 36, t)) {
 				a.goBack()
 			}
 			ui.Text(c, "观鸟热点").FontSize(16).FontWeight(600).SingleLine().Grow(1)
 		})
 
 		ui.Scroll(c.Key("es-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
-			ui.Column(c).FillWidth().Padding(6, 18, 44, 18).Gap(14).Children(func() {
+			ui.Column(c).FillWidth().Padding(6, 18, max(float32(44), bottom+28), 18).Gap(14).Children(func() {
 				tactileCard(c, t).Padding(16).Gap(10).Children(func() {
 					ui.Text(c, spot.LocName).FontSize(22).FontWeight(600).LetterSpacing(-0.1)
 					ui.Textf(c, "累计 %d 种 · 最近活跃 %s · %.4f, %.4f",
@@ -966,10 +1087,10 @@ func (a *AppState) viewExploreHotspotDetail(c *ui.Context, t *ui.Theme, locID st
 						FontSize(12).TextColor(t.TextMuted)
 
 					ui.Row(c).FillWidth().Gap(10).Padding(4, 0, 0, 0).Children(func() {
-						if tactilePrimaryBtn(c, "hs-new-log", "在此处写日志", t).Grow(1).Height(42).Radius(21).Clicked() {
+						if hapticClick(tactilePrimaryBtn(c, "hs-new-log", "在此处写日志", t).Grow(1).Height(42).Radius(21)) {
 							a.OpenNewJournalModal("", spot.LocName)
 						}
-						if monochromeButton(c, "hs-open-web", "网页查看 ↗", false, t).Height(42).Radius(21).Clicked() {
+						if hapticClick(monochromeButton(c, "hs-open-web", "网页查看 ↗", false, t).Height(42).Radius(21)) {
 							_ = mygo.Shell.OpenExternal("https://ebird.org/hotspot/" + spot.LocID)
 						}
 					})
@@ -1000,10 +1121,10 @@ func (a *AppState) viewExploreHotspotDetail(c *ui.Context, t *ui.Theme, locID st
 										}
 										ui.Textf(c, "%s · %s", model.FormatObsTime(o.ObsDt), cnt).FontSize(12).TextColor(t.TextMuted)
 									})
-									if filterPill(c, fmt.Sprintf("eslog-%d", i), "记日志", false, t).Clicked() {
+									if hapticClick(filterPill(c, fmt.Sprintf("eslog-%d", i), "记日志", false, t)) {
 										a.OpenNewJournalModal(o.SpeciesCode, spot.LocName)
 									}
-									if filterPill(c, fmt.Sprintf("essp-%d", i), "图鉴", true, t).Clicked() {
+									if hapticClick(filterPill(c, fmt.Sprintf("essp-%d", i), "图鉴", true, t)) {
 										a.OpenSpeciesInGuide(o.SpeciesCode)
 									}
 								})
@@ -1026,7 +1147,7 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 		ui.Column(c).Fill().Children(func() {
 			ui.Row(c).FillWidth().Padding(8, 20, 14, 20).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "选择观鸟地区").FontSize(16).FontWeight(600)
-				if filterPill(c, "rp-close", "关闭", false, t).Clicked() {
+				if hapticClick(filterPill(c, "rp-close", "关闭", false, t)) {
 					a.regRegionSheetOpen = false
 				}
 			})
@@ -1048,7 +1169,7 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 						}
 						ui.Text(c, "使用手机 GPS 定位周边").FontSize(14).FontWeight(500).TextColor(t.Text).Grow(1)
 					})
-					if gpsBtn.Clicked() {
+					if hapticClick(gpsBtn) {
 						a.fillGPSLocationAsync("explore")
 					}
 					if a.regGPSNote != "" {
@@ -1058,7 +1179,7 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 					ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 						in := minimalTextInput(c, "rp-custom", &a.regCustomCode,
 							"地区码或纬度,经度（如 US-NY / 39.9,116.4）", "自定义地区", t).Grow(1)
-						if in.Submitted() || filterPill(c, "rp-go", "查询", true, t).Height(40).Radius(12).Clicked() {
+						if in.Submitted() || hapticClick(filterPill(c, "rp-go", "查询", true, t).Height(40).Radius(12)) {
 							a.regRegionSheetOpen = false
 							a.resetExploreForRegionChange()
 						}
@@ -1068,53 +1189,56 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 				minimalSearchBar(c, "rp-search", &a.regRegionQuery, "搜索省市或地区", "搜索地区", t)
 			})
 
-			ui.Scroll(c.Key("rp-list")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Padding(4, 18, 28, 18).Children(func() {
-				q := strings.ToLower(strings.TrimSpace(a.regRegionQuery))
-				tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
-					for _, reg := range api.ChinaRegions {
-						r := reg
-						if q != "" && !strings.Contains(strings.ToLower(r.Name), q) && !strings.Contains(strings.ToLower(r.Code), q) {
-							continue
-						}
-						active := false
-						switch a.regRegionTarget {
-						case "settings":
-							active = a.setRegionLabel == r.Name
-						case "seasonal":
-							active = strings.EqualFold(a.seasonalRegionCode, r.Code)
-						default:
-							active = a.regCustomCode == "" && a.regRegionLabel == r.Name
-						}
-						row := ui.Row(c.Key("regopt-"+r.Code)).FillWidth().Padding(13, 16).
-							Justify(ui.SpaceBetween).AlignItems(ui.Center).
-							Role(ui.RoleButton).Label(r.Name)
-						row.Children(func() {
-							weight := 400
-							if active {
-								weight = 500
+			ui.Scroll(c.Key("rp-list")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
+				ui.Column(c).FillWidth().Padding(4, 18, 36, 18).Children(func() {
+					q := strings.ToLower(strings.TrimSpace(a.regRegionQuery))
+					tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
+						for _, reg := range api.ChinaRegions {
+							r := reg
+							if q != "" && !strings.Contains(strings.ToLower(r.Name), q) && !strings.Contains(strings.ToLower(r.Code), q) {
+								continue
 							}
-							ui.Text(c, r.Name).FontSize(15).FontWeight(weight)
-							if active {
-								ui.Icon(c, iconCheck).FontSize(16).TextColor(opticalAccentColor(t))
-							}
-						})
-						if row.Clicked() {
-							a.regRegionSheetOpen = false
+							active := false
 							switch a.regRegionTarget {
 							case "settings":
-								a.setRegionLabel = r.Name
-								a.saveRegionPreferenceOnly(c, r.Code)
+								active = a.setRegionLabel == r.Name
 							case "seasonal":
-								a.seasonalRegionCode = r.Code
-								a.seasonalRegionLabel = r.Name
-								a.seasonalScroll.Y = 0
+								active = strings.EqualFold(a.seasonalRegionCode, r.Code)
 							default:
-								a.regCustomCode = ""
-								a.regRegionLabel = r.Name
-								a.resetExploreForRegionChange()
+								active = a.regCustomCode == "" && a.regRegionLabel == r.Name
+							}
+							row := ui.Row(c.Key("regopt-"+r.Code)).FillWidth().Padding(13, 16).
+								Justify(ui.SpaceBetween).AlignItems(ui.Center).
+								Role(ui.RoleButton).Label(r.Name)
+							row.Children(func() {
+								weight := 400
+								if active {
+									weight = 500
+								}
+								ui.Text(c, r.Name).FontSize(15).FontWeight(weight)
+								if active {
+									ui.Icon(c, iconCheck).FontSize(16).TextColor(opticalAccentColor(t))
+								}
+							})
+							if hapticClick(row) {
+								a.regRegionSheetOpen = false
+								switch a.regRegionTarget {
+								case "settings":
+									a.setRegionLabel = r.Name
+									a.saveRegionPreferenceOnly(c, r.Code)
+								case "seasonal":
+									a.seasonalRegionCode = r.Code
+									a.seasonalRegionLabel = r.Name
+									a.seasonalScroll.Y = 0
+									a.seasonalList.ScrollIntoView(0)
+								default:
+									a.regCustomCode = ""
+									a.regRegionLabel = r.Name
+									a.resetExploreForRegionChange()
+								}
 							}
 						}
-					}
+					})
 				})
 			})
 		})

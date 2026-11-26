@@ -186,7 +186,7 @@ func (a *AppState) viewJournalHome(c *ui.Context, t *ui.Theme) {
 						ui.Icon(c, iconShare).FontSize(13).TextColor(t.Text)
 						ui.Text(c, "导出").FontSize(13).FontWeight(500)
 					})
-					if shareBtn.Clicked() {
+					if hapticClick(shareBtn) {
 						a.exportSheetOpen = true
 					}
 				})
@@ -240,7 +240,7 @@ func (a *AppState) viewJournalHome(c *ui.Context, t *ui.Theme) {
 			fab.Children(func() {
 				ui.Icon(c, iconPlus).FontSize(22).TextColor(t.AccentText)
 			})
-			if fab.Clicked() {
+			if hapticClick(fab) {
 				a.OpenNewJournalModal("", "")
 			}
 		}
@@ -340,7 +340,7 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 													ui.Icon(c, ic).FontSize(10).TextColor(opticalAccentColor(t))
 													ui.Text(c, label).FontSize(11).FontWeight(500).TextColor(opticalAccentColor(t))
 												})
-												if playPill.Clicked() {
+												if hapticClick(playPill) {
 													if isThis && pst.Active {
 														a.player.TogglePause()
 													} else {
@@ -357,7 +357,7 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 									}
 								})
 							})
-							if row.Clicked() {
+							if hapticClick(row) {
 								copyE := entry
 								a.journalActiveEntry = &copyE
 								a.journalDetailPager.Page = 0
@@ -420,7 +420,7 @@ func (a *AppState) buildLifelistGrid(c *ui.Context, t *ui.Theme, unlocked []mode
 								a.loadLocalImageAsync(bird.CoverPhotoPath)
 								localSrc = a.localImgCache[bird.CoverPhotoPath]
 							} else if thumbURL != "" {
-								netSrc, _ = netimage.Load(c, thumbURL, netimage.Options{MaxSide: 380})
+								netSrc, _ = netimage.Load(c, thumbURL, netimage.Options{MaxSide: speciesThumbMaxSide})
 							}
 							hasImg := localSrc != nil || netSrc != nil
 							tile := applyCardRimAndShadow(
@@ -469,7 +469,7 @@ func (a *AppState) buildLifelistGrid(c *ui.Context, t *ui.Theme, unlocked []mode
 									ui.Text(c, fallbackText(fam, bird.FirstLocation)).FontSize(12).TextColor(subCol).SingleLine()
 								})
 							})
-							if tile.Clicked() {
+							if hapticClick(tile) {
 								if _, ok := a.taxonByCode[bird.SpeciesCode]; ok {
 									a.OpenSpeciesInGuide(bird.SpeciesCode)
 								} else {
@@ -517,26 +517,27 @@ func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID str
 		return
 	}
 
+	_, _, bottom, _ := c.SafeArea()
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).FillWidth().Padding(immersiveTopPad(c, 14), 18, 10, 18).Gap(8).AlignItems(ui.Center).Children(func() {
-			if tactileIconBtn(c, "jd-back-btn", "返回", iconBack, 36, t).Clicked() {
+			if hapticClick(tactileIconBtn(c, "jd-back-btn", "返回", iconBack, 36, t)) {
 				a.goBack()
 			}
 			ui.Text(c, entry.ComName).FontSize(16).FontWeight(600).SingleLine().Grow(1)
-			if tactileIconBtn(c, "jd-share-img", "图片分享", iconShare, 34, t).Clicked() {
+			if hapticClick(tactileIconBtn(c, "jd-share-img", "图片分享", iconShare, 34, t)) {
 				a.ShareJournalEntryImageAsync(*entry)
 			}
-			if filterPill(c, "jd-edit", "编辑", false, t).Clicked() {
+			if hapticClick(filterPill(c, "jd-edit", "编辑", false, t)) {
 				a.openEditJournalModal(*entry)
 			}
-			if circleIconBtn(c, "jd-del", "删除日志", iconTrash, t.Danger.Alpha(0.12), t.Danger, 34).Clicked() {
+			if hapticClick(circleIconBtn(c, "jd-del", "删除日志", iconTrash, t.Danger.Alpha(0.12), t.Danger, 34)) {
 				a.jDeleteTargetID = entry.ID
 				a.jDeleteConfirm = true
 			}
 		})
 
 		ui.Scroll(c.Key("jd-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
-			ui.Column(c).FillWidth().Padding(6, 18, 44, 18).Gap(14).Children(func() {
+			ui.Column(c).FillWidth().Padding(6, 18, max(float32(44), bottom+28), 18).Gap(14).Children(func() {
 				if len(entry.PhotoPaths) > 0 {
 					count := len(entry.PhotoPaths)
 					tactileCard(c, t).Height(264).Clip().Children(func() {
@@ -554,7 +555,7 @@ func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID str
 									})
 								}
 							})
-							if slide.Clicked() {
+							if hapticClick(slide) {
 								a.openLocalPhotosViewer(entry.ComName+" · 我的记录", entry.PhotoPaths, i)
 							}
 						}).Fill()
@@ -603,7 +604,7 @@ func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID str
 							playBtn.Children(func() {
 								ui.Icon(c, ic).FontSize(15).TextColor(fg)
 							})
-							if playBtn.Clicked() {
+							if hapticClick(playBtn) {
 								if isThis && pst.Active {
 									a.player.TogglePause()
 								} else {
@@ -630,7 +631,7 @@ func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID str
 				})
 
 				if _, ok := a.taxonByCode[entry.SpeciesCode]; ok {
-					if monochromeButton(c, "jd-goto-guide", "查看图鉴详情 ↗", false, t).FillWidth().Clicked() {
+					if hapticClick(monochromeButton(c, "jd-goto-guide", "查看图鉴详情 ↗", false, t).FillWidth()) {
 						a.OpenSpeciesInGuide(entry.SpeciesCode)
 					}
 				}
@@ -662,21 +663,21 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 					Role(ui.RoleButton).Label("取消").Children(func() {
 					ui.Text(c, "取消").FontSize(15).TextColor(t.TextMuted)
 				})
-				if cancelBtn.Clicked() {
+				if hapticClick(cancelBtn) {
 					a.recorder.Cancel()
 					a.jRecBusy = false
 					a.journalSheetOpen = false
 				}
 				ui.Text(c, title).FontSize(16).FontWeight(600)
 				saveBtn := filterPill(c, "j-modal-save", "保存记录", true, t).Disabled(recStatus.Recording || a.jRecBusy)
-				if saveBtn.Clicked() {
+				if hapticClick(saveBtn) {
 					a.saveJournalDraft(c)
 				}
 			})
 			minimalDivider(c, t)
 
 			ui.Scroll(c.Key("j-sheet-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
-				ui.Column(c).FillWidth().Padding(10, 18, 28, 18).Gap(10).Children(func() {
+				ui.Column(c).FillWidth().Padding(10, 18, 36, 18).Gap(10).Children(func() {
 					// 1. 观测鸟种卡片
 					tactileCard(c, t).Padding(13).Gap(8).Children(func() {
 						ui.Text(c, "观测鸟种").FontSize(12).FontWeight(500).LetterSpacing(0.2).TextColor(t.TextMuted)
@@ -688,7 +689,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 							ui.Row(c).FillWidth().Gap(6).Wrap().Children(func() {
 								for i, tx := range suggestions {
 									item := tx
-									if filterPill(c, fmt.Sprintf("jsug-%d-%s", i, item.SpeciesCode), item.ComName, false, t).Clicked() {
+									if hapticClick(filterPill(c, fmt.Sprintf("jsug-%d-%s", i, item.SpeciesCode), item.ComName, false, t)) {
 										a.jDraftSpecies = formatSpeciesOption(item)
 									}
 								}
@@ -715,7 +716,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 										ui.Icon(c, iconLocate).FontSize(17).TextColor(opticalAccentColor(t))
 									}
 								})
-								if gpsBtn.Clicked() {
+								if hapticClick(gpsBtn) {
 									a.fillGPSLocationAsync("journal")
 								}
 							})
@@ -737,7 +738,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 										}),
 										t,
 									)
-									if dec.Clicked() && a.jDraftCount > 1 {
+									if hapticClick(dec) && a.jDraftCount > 1 {
 										a.jDraftCount--
 									}
 									ui.Textf(c, " %d ", max(1, a.jDraftCount)).FontSize(15).FontWeight(600).FontFeatures("tnum")
@@ -748,7 +749,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 										}),
 										t,
 									)
-									if inc.Clicked() {
+									if hapticClick(inc) {
 										a.jDraftCount++
 									}
 								})
@@ -773,7 +774,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 								ui.Icon(c, iconCamera).FontSize(19).TextColor(t.Text)
 								ui.Text(c, "添加").FontSize(11).FontWeight(500).TextColor(secondaryTextColor(t))
 							})
-							if addTile.Clicked() {
+							if hapticClick(addTile) {
 								a.journalPhotoSheet = true
 							}
 
@@ -787,7 +788,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 									}
 									rm := circleIconBtn(c, fmt.Sprintf("jdprm-%d", i), "移除照片", iconClose, ui.RGBA(0, 0, 0, 0.58), ui.RGB(255, 255, 255), 20).
 										Absolute().Top(4).Right(4)
-									if rm.Clicked() {
+									if hapticClick(rm) {
 										a.jDraftPhotos = append(a.jDraftPhotos[:idx], a.jDraftPhotos[idx+1:]...)
 									}
 								})
@@ -799,7 +800,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 					tactileCard(c, t).Padding(13).Gap(8).Children(func() {
 						ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 							ui.Text(c, "现场鸟鸣录音").FontSize(14).FontWeight(500)
-							if filterPill(c, "j-pick-audio", "导入音频", false, t).Disabled(recStatus.Recording || a.jRecBusy).Clicked() {
+							if hapticClick(filterPill(c, "j-pick-audio", "导入音频", false, t).Disabled(recStatus.Recording || a.jRecBusy)) {
 								a.pickJournalAudioAsync()
 							}
 						})
@@ -817,7 +818,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 									recCircle.Children(func() {
 										ui.Icon(c, iconMic).FontSize(18).TextColor(t.AccentText)
 									})
-									if recCircle.Clicked() && !a.jRecBusy {
+									if hapticClick(recCircle) && !a.jRecBusy {
 										a.startJournalRecording()
 									}
 								})
@@ -826,12 +827,12 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 									if a.jDraftAudio != "" {
 										ui.Text(c, "已录制："+filepath.Base(a.jDraftAudio)).FontSize(14).FontWeight(500).SingleLine()
 										ui.Row(c).Gap(6).Children(func() {
-											if filterPill(c, "j-prev-aud", "试听", true, t).Clicked() {
+											if hapticClick(filterPill(c, "j-prev-aud", "试听", true, t)) {
 												a.player.PlayFile(a.jDraftAudio, "录音试听", filepath.Base(a.jDraftAudio), func() {
 													a.updateUI(func() {})
 												})
 											}
-											if filterPill(c, "j-clr-aud", "移除", false, t).Clicked() {
+											if hapticClick(filterPill(c, "j-clr-aud", "移除", false, t)) {
 												a.jDraftAudio = ""
 											}
 										})
@@ -852,7 +853,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 									stopCircle.Children(func() {
 										ui.Icon(c, iconStop).FontSize(17).TextColor(ui.RGB(255, 255, 255))
 									})
-									if stopCircle.Clicked() {
+									if hapticClick(stopCircle) {
 										a.stopJournalRecording()
 									}
 								})

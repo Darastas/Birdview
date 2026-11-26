@@ -1,85 +1,81 @@
-# Birdview
+<p align="center">
+  <img src="resources/icon.png" width="112" alt="Birdview 应用图标" />
+</p>
 
-基于 **Go + MyGo v0.10.0 Native UI** 开发的跨平台移动端观鸟图鉴与个人观鸟日志应用（支持 **Android APK / AAB**、iOS 原生工程及桌面端手机视口预览）。所有物种名录、图鉴照片、鸟鸣参考录音、中文百科及区域实时观鸟数据均通过在线 API 按需流式加载，保持极轻量安装包体积。
+<h1 align="center">Birdview v1.0.0</h1>
 
-## 核心功能
+<p align="center">
+  轻盈纯粹的掌上观鸟图鉴、时令物候指南与野外记录手账
+</p>
 
-### 1. 触感画册与图鉴
-- 采用自研跨平台 Kage **光学液态玻璃（Optical Liquid Glass）** 悬浮底座与图上浮标（高斯背景模糊、边缘折射弯曲、色散与双极菲涅耳高光），搭配滑动顶部渐变过渡遮罩、统一圆角胶囊交互控件、流光骨架屏跳动小鸟加载态及极简分块设置页，完整适配浅色与深色模式。
-- 配置跨平台现代无衬线字体栈（桌面端 `HarmonyOS Sans SC` / `MiSans` / `Noto Sans SC` 配合完整 ClearType 亚像素抗锯齿，移动端使用系统原生渲染与连续字重），并移除冗余分组标签。
-- 接入 **eBird API v2** 全球物种级分类名录（大陆简体中文 `zh_SIM`），支持独立地点范围选择器、阴刻「全部 / 已解锁」切换开关与内置搜索的 45 目 249 科中文筛选抽屉。
-- 按需流式加载缩略图与自适应比例全屏图集缩放灯箱、精简胶囊态悬浮鸟鸣试听条（**iNaturalist Sounds** / **Xeno-canto v3**），并阅读强制大陆简体转写的 **中文维基百科** 简介及品牌图标外链（维基 / iNaturalist / eBird）。
-
-### 2. 区域探索与观鸟热点
-- 集成手机 GPS 一键定位与全国 34 个省级行政区选择。
-- **严格区分「现场实拍」与「图鉴资料」**：
-  - **现场实拍**：拉取所在区域真实目击者拍摄并上传的现场摄影照片与现场录音，每张照片均严格对应当次观测记录。
-  - **近期目击 / 珍稀记录 / 观鸟热点**：基于 **eBird API v2** 展示昨日统计、区域目击动态、完整清单上下文及近 30 天高鸟种数观鸟热点；eBird 记录详情页绝不混排图鉴通用图。
-
-### 3. 观鸟日志与已解锁鸟种
-- 支持拍摄现场照片或从系统相册选取图片（移动端原生调用 `plugins/imagepicker`，桌面端自动回退系统文件对话框）。
-- **原生麦克风现场录音**：通过自主封装的 `internal/micplugin`（Android `AudioRecord` / iOS `AVFoundation` / Windows `winmm.dll`）实时录制 44.1 kHz 单声道 WAV 鸟鸣并附带声波电平反馈，同时支持导入外部音频文件。
-- 首次记录鸟种自动解锁并累计观鸟成就进度与分科统计；支持左滑快速删除、CSV（UTF-8 BOM）/ JSON 导出与系统分享。
-
-### 4. 设置与在线缓存
-- 在「设置」页面配置并在线校验个人 **eBird API Key**（优先保存至系统凭据库 `mygo.Secrets` / Android Keystore / iOS Keychain）及可选 **Xeno-canto API v3 Key**。
-- 支持自动 / 浅色 / 深色外观实时切换，以及 64 MB 媒体缓存与网络图片缓存的一键统计清理。
+<p align="center">
+  <a href="https://github.com/Darastas/Birdview/releases/latest"><strong>前往下载 Android APK (v1.0.0) →</strong></a>
+</p>
 
 ---
 
-## 开发、测试与构建
+## 界面预览
 
-### 环境要求
-- Go `1.27+`
-- Android 构建需配置 Android SDK、NDK 与 JDK 17（可通过 `go tool mygo doctor` 自检）
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/screenshots/seasonal.png" width="175" alt="观鸟指南首页" /><br /><sub><b>时令观鸟指南</b></sub></td>
+    <td align="center"><img src="docs/screenshots/seasonal_detail.png" width="175" alt="时令详情与全年物候月历" /><br /><sub><b>物候月历与点位详情</b></sub></td>
+    <td align="center"><img src="docs/screenshots/guide.png" width="175" alt="鸟类图鉴画廊" /><br /><sub><b>全出血多图图鉴</b></sub></td>
+    <td align="center"><img src="docs/screenshots/share_card.png" width="175" alt="自动排版分享图" /><br /><sub><b>精美排版长图分享</b></sub></td>
+    <td align="center"><img src="docs/screenshots/settings.png" width="175" alt="设置与偏好" /><br /><sub><b>简洁偏好设置</b></sub></td>
+  </tr>
+</table>
 
-### 运行测试与检查
+---
+
+## 产品亮点
+
+### 1. 时令观鸟指南 · 这个月去哪看什么鸟
+- **按月按地自动匹配**：无需再手动翻找厚重工具书，打开即可查看你所在省区当月最值得关注的水鸟、猛禽与林鸟，并贴心分为 **马上离开 · 当季 · 刚到 · 马上到** 四大时令队列。
+- **全年物候月历与换羽演变**：点开任意鸟种即可浏览 1–12 月柔和胶囊物候韵律月历，直观对比过境、越冬与繁殖月份；并收录繁殖羽/冬羽换羽变化、最佳观察时段与具体到湿地公园的推荐点位。
+- **追鸟备忘、手机日历与卡片分享**：遇到心仪目标点一下加入 **追鸟备忘**，支持标为已见、一键写入 **手机系统日历** 提醒，并可自动排版成精美清单长图或单鸟时令海报分享给鸟友。
+
+### 2. 鸟类图鉴 · 摄影画廊与鸣声百科
+- **中国与全球鸟类中文名录**：支持切换全国名录、单省区名录与全球名录，覆盖 **45 目 249 科** 中文检索，并可一键只看已解锁鸟种。
+- **多图精选画廊与声景试听**：按需流式拉取每一种鸟的多张生态高清大图（支持全屏双指缩放灯箱）、野外实录鸟鸣音频与中文维基百科摘要。
+- **终身鸟种图谱**：记下一条观鸟日志即自动点亮对应鸟种，卡片右上角亮起绿色解锁徽标，记录你的观鸟里程碑。
+
+### 3. 周边探索 · 现场实拍与近期目击
+- **四大动态板块**：集成免 Key 即可浏览的 **现场实拍**（来自周边观鸟者当次上传的真实野外照片与现场录音），以及 **近期目击**、**珍稀记录** 与 **观鸟热点**。
+- **GPS 自动定位与省市直达**：支持手机 GPS 一键定位并自动识别所在城市，或直接搜索切换全国省区与全球经纬度/地区码。
+- **智能会话缓存**：切换子页面保留已加载内容与浏览位置，告别每次切换都要重新转圈等待。
+
+### 4. 观鸟日志与手账分享 · 私密存于本机
+- **图文与现场录音齐备**：记录鸟种时支持智能中文/拉丁名联想，直接拍照或从相册选图，并可按住麦克风实时录制高清晰 **野外鸟鸣 WAV 音频**。
+- **自动排版精美图片分享**：支持为单条目击生成明信片式观鸟手账，或将历史记录自动排版成长图海报保存与分享；同时支持 **CSV 表格备份**。
+- **隐私安全**：你的个人观鸟日志、照片与录音全程仅存储在手机本地，API Key 由系统安全凭据库加密保管。
+
+### 5. 细腻轻盈的移动端手感
+- **滚动自动隐现的光学悬浮底栏**：向下浏览长列表时底部导航栏丝滑收起，上滑即刻柔和浮现，把更多视野留给飞羽与文字。
+- **主题与全域触感反馈**：支持 **跟随系统 / 浅色 / 深色** 实时切换，全应用按钮与分段控件配以温和精准的按键震动（支持在「设置」中随时一键关闭）。
+
+---
+
+## 快速开始
+
+1. 前往 [**GitHub Releases**](https://github.com/Darastas/Birdview/releases/latest) 下载最新版 **`birdview-1.0.0.apk`** 并安装到 Android 手机（支持 Android 8.0 及以上）。
+2. 安装后无需登录或填写复杂配置，即可直接使用 **观鸟指南**、**现场实拍** 与 **本地观鸟日志**。
+3. 如需解锁 **近期目击、珍稀记录、观鸟热点与完整地区物种名录**，可前往「设置 → 数据源密钥」免费申请并填入个人 **eBird API Key**（可选补充 **Xeno-canto API v3 Key** 扩展专业鸟鸣曲库）。
+
+---
+
+## 致谢与源码构建（开发者）
+
+- **数据与媒体致谢**：分类与区域目击数据来自 [eBird API v2](https://ebird.org/)，物种生态多图、现场实拍与野外录音来自 [iNaturalist](https://www.inaturalist.org/)，扩展鸟鸣来自 [Xeno-canto v3](https://xeno-canto.org/)，物种中文摘要来自中文维基百科。
+- **本地运行与打包**（需 Go `1.27+`，Android 打包另需 Android SDK / NDK / JDK 17）：
 
 ```bash
-go test -v ./...
-go vet ./...
-go tool mygo vet .
-```
+# 运行完整自动化测试
+go test -v ./internal/...
 
-### Android 打包构建
+# 桌面端手机视口预览运行
+go run .
 
-```bash
-# 构建单架构快速验证（arm64）
-go tool mygo build -platform android/arm64
-
-# 正式构建全架构安装包（输出 build/android/birdview-2.0.0.apk 与 .aab）
+# 构建 Android Release APK / AAB（输出 build/android/birdview-1.0.0.apk）
 go tool mygo build -platform android
 ```
-
-> 若 Windows 本机 `~/.gradle/gradle.properties` 配置了失效代理，可通过清理代理环境变量或覆盖 `-Dhttp.proxyHost=` / `GRADLE_USER_HOME` 后正常执行 Gradle 构建。
-
-### 桌面预览构建
-
-```bash
-go run .
-go tool mygo build -skip-installer
-```
-
----
-
-## 目录结构
-
-```text
-Birdview/
-├── main.go                 # 程序入口、窗口配置与生命周期
-├── mygo.json               # MyGo v0.10.0 应用及 Android/iOS 原生打包配置
-├── resources/              # 1024×1024 应用图标与 Android 自适应图标前景层
-└── internal/
-    ├── model/              # 领域数据模型与鸟纲目/科中文化词典
-    ├── store/              # 个人观鸟日志、鸟种解锁、缩略图索引与 64MB LRU 缓存
-    ├── api/                # eBird v2、iNaturalist、Xeno-canto v3 与中文维基客户端
-    ├── audioctl/           # 跨平台流式播放器与麦克风录音控制
-    ├── micplugin/          # Android (Kotlin) / iOS (Swift) 原生麦克风录音插件
-    └── appui/              # 基于 MyGo v0.10.0 ui/mobile 的移动原生界面与交互测试
-```
-
-## 数据安全与隐私
-
-- 网络请求统一经由 `mygo/netproxy` 遵循系统代理。
-- 个人日志与录制/导入的照片和音频仅保存在本机应用数据目录，不上传至任何第三方服务器。
-- API Key 通过系统安全凭据库加密存放，严禁将任何真实 API Key 写入或提交至代码仓库。

@@ -2,6 +2,7 @@ package mygo
 
 import (
 	"errors"
+	"sync/atomic"
 
 	"github.com/egoist/mygo/internal/platform"
 )
@@ -16,15 +17,33 @@ func device() (platform.DeviceBackend, bool) {
 
 // HapticsModule plays the feel of what happens on a phone's screen. Use the
 // Haptics singleton.
-type HapticsModule struct{}
+type HapticsModule struct {
+	disabled atomic.Bool
+}
 
 // Haptics plays the feel of what happens on a phone's screen: UIKit's
 // feedback generators on iOS, and on Android the system's haptic constants,
 // as the user's settings allow. Desktops have none.
 var Haptics = &HapticsModule{}
 
-func (*HapticsModule) play(kind string) {
+// SetEnabled controls whether haptic feedback triggers globally.
+func (h *HapticsModule) SetEnabled(enabled bool) {
+	h.disabled.Store(!enabled)
+}
+
+// Enabled reports whether global haptic feedback is active.
+func (h *HapticsModule) Enabled() bool {
+	return !h.disabled.Load()
+}
+
+func (h *HapticsModule) play(kind string) {
+	if h.disabled.Load() {
+		return
+	}
 	App.WhenReady(func() {
+		if h.disabled.Load() {
+			return
+		}
 		if d, ok := device(); ok {
 			d.Haptic(kind)
 		}

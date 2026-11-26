@@ -257,9 +257,9 @@ func RenderSeasonalBirdShareCard(bird model.SeasonalBird, zone model.EcoZone, mo
 	phase := bird.PhaseFor(zone, month)
 	cal := bird.MonthCalendar(zone)
 	hasImg := hero != nil
-	h := 650
+	h := 768
 	if !hasImg {
-		h = 520
+		h = 636
 	}
 
 	return ui.Render(func(c *ui.Context) {
@@ -298,28 +298,11 @@ func RenderSeasonalBirdShareCard(bird model.SeasonalBird, zone model.EcoZone, mo
 						statusPill(c, phase.Label(), bg, fg)
 					})
 
-					// 1-12 月物候月历条
-					ui.Column(c).FillWidth().Gap(5).Children(func() {
-						ui.Textf(c, "%s全年物候月历（当前高亮 %d 月）", model.EcoZoneLabel(zone), month).
+					// 1-12 月柔和胶囊物候月历（与详情页共用样式，无生硬黑边）
+					ui.Column(c).FillWidth().Gap(6).Children(func() {
+						ui.Textf(c, "%s全年物候月历 · 当前高亮 %d 月", model.EcoZoneLabel(zone), month).
 							FontSize(11).FontWeight(600).TextColor(ui.Hex("#6B7F88"))
-						ui.Row(c).FillWidth().Gap(3).Children(func() {
-							for m := 1; m <= 12; m++ {
-								ph := cal[m-1]
-								cellBg, cellFg := seasonalPhaseColors(ph, false)
-								if ph == model.PhaseAbsent {
-									cellBg = ui.Hex("#EEF2F4")
-									cellFg = ui.Hex("#9AAAB2")
-								}
-								cell := ui.Column(c.Key(m)).Grow(1).Basis(0).Height(30).Radius(7).
-									Background(cellBg).AlignItems(ui.Center).Justify(ui.Center)
-								if m == month {
-									cell.Border(1.8, ui.Hex("#1E3632"))
-								}
-								cell.Children(func() {
-									ui.Textf(c, "%d", m).FontSize(10.5).FontWeight(600).TextColor(cellFg)
-								})
-							}
-						})
+						renderSeasonalPhenologyChart(c, cal, month, false, false, nil)
 					})
 
 					shareInfoSection(c, "在哪里看 · 推荐点位", bird.RecommendedSpots(zone))
@@ -539,7 +522,7 @@ func (a *AppState) viewShareImagePreviewOverlay(c *ui.Context, t *ui.Theme) {
 				ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, fallbackText(a.sharePreviewTitle, "图片分享预览")).
 						FontSize(17).FontWeight(600).TextColor(ui.RGB(255, 255, 255))
-					if circleIconBtn(c, "sp-close", "关闭图片预览", iconClose, ui.RGBA(255, 255, 255, 0.16), ui.RGB(255, 255, 255), 36).Clicked() {
+					if hapticClick(circleIconBtn(c, "sp-close", "关闭图片预览", iconClose, ui.RGBA(255, 255, 255, 0.16), ui.RGB(255, 255, 255), 36)) {
 						a.sharePreviewOpen = false
 					}
 				})
@@ -561,7 +544,7 @@ func (a *AppState) viewShareImagePreviewOverlay(c *ui.Context, t *ui.Theme) {
 						ui.Icon(c, iconDownload).FontSize(16).TextColor(ui.RGB(255, 255, 255))
 						ui.Text(c, "保存图片").FontSize(14).FontWeight(500).TextColor(ui.RGB(255, 255, 255))
 					})
-					if saveBtn.Clicked() {
+					if hapticClick(saveBtn) {
 						srcPath := a.sharePreviewPath
 						go func() {
 							dest, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
@@ -595,7 +578,7 @@ func (a *AppState) viewShareImagePreviewOverlay(c *ui.Context, t *ui.Theme) {
 						ui.Icon(c, iconShare).FontSize(16).TextColor(ui.RGB(255, 255, 255))
 						ui.Text(c, "立即分享").FontSize(14).FontWeight(600).TextColor(ui.RGB(255, 255, 255))
 					})
-					if shareBtn.Clicked() {
+					if hapticClick(shareBtn) {
 						srcPath := a.sharePreviewPath
 						shareTxt := a.sharePreviewText
 						go func() {

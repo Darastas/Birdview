@@ -296,3 +296,59 @@ func TestChinaRegionsCleanNamesReverseGeocodeAndSeasonalData(t *testing.T) {
 			blncra.PhaseFor(model.ZoneNorth, 11), blncra.PhaseFor(model.ZoneSouthwest, 11), blncra.PhaseFor(model.ZoneNational, 11))
 	}
 }
+
+func TestFetchSpeciesGuideMediaMultiPhotoAndThumbFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/taxa":
+			q := r.URL.Query().Get("q")
+			if strings.Contains(q, "Cygnus") {
+				w.Write([]byte(`{"results":[{"id":6921,"name":"Cygnus cygnus","observations_count":8800,"default_photo":{"medium_url":"https://static.inaturalist.org/photos/100/medium.jpg","attribution":"Cover"}}]}`))
+				return
+			}
+			w.Write([]byte(`{"results":[{"id":7106,"name":"Aix sponsa-syn","preferred_common_name":"鸳鸯","iconic_taxon_name":"Aves","default_photo":{"medium_url":"https://static.inaturalist.org/photos/700/medium.jpg"}}]}`))
+		case r.URL.Path == "/taxa/6921":
+			w.Write([]byte(`{"results":[{"id":6921,"name":"Cygnus cygnus","taxon_photos":[
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/101/medium.jpg","attribution":"P1"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/102/medium.jpg","attribution":"P2"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/103/medium.jpg","attribution":"P3"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/104/medium.jpg","attribution":"P4"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/105/medium.jpg","attribution":"P5"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/106/medium.jpg","attribution":"P6"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/107/medium.jpg","attribution":"P7"}}
+			]}]}`))
+		case r.URL.Path == "/observations" && r.URL.Query().Get("taxon_id") == "6921":
+			w.Write([]byte(`{"results":[
+				{"id":1,"photos":[{"url":"https://static.inaturalist.org/photos/201/square.jpg","attribution":"Obs1"}]},
+				{"id":2,"photos":[{"url":"https://static.inaturalist.org/photos/202/square.jpg","attribution":"Obs2"}]},
+				{"id":3,"photos":[{"url":"https://static.inaturalist.org/photos/203/square.jpg","attribution":"Obs3"}]},
+				{"id":4,"photos":[{"url":"https://static.inaturalist.org/photos/204/square.jpg","attribution":"Obs4"}]}
+			]}`))
+		case r.URL.Path == "/observations":
+			w.Write([]byte(`{"results":[{"user":{"name":"Rec"},"place_guess":"Hokkaido","sounds":[{"file_url":"https://example.com/swan.mp3","file_content_type":"audio/mpeg"}]}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient()
+	c.INatBaseURL = srv.URL
+	c.WikiBaseURL = srv.URL
+
+	media := c.FetchSpeciesGuideMedia(context.Background(), "Cygnus cygnus", "大天鹅", "")
+	if len(media.Photos) != 12 {
+		t.Fatalf("expected 12 curated+research photos from /taxa/{id} and /observations, got %d (%+v)", len(media.Photos), media.Photos)
+	}
+	if len(media.Sounds) != 1 {
+		t.Fatalf("expected 1 sound recording, got %+v", media.Sounds)
+	}
+
+	thumb, err := c.FetchSpeciesThumbWithFallback(context.Background(), "Aix oldname", "鸳鸯")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thumb != "https://static.inaturalist.org/photos/700/small.jpg" {
+		t.Fatalf("expected common-name fallback thumb, got %q", thumb)
+	}
+}

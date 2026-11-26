@@ -11,6 +11,8 @@ import (
 	"github.com/Darastas/Birdview/internal/model"
 )
 
+const maxGuidePhotos = 12
+
 func cloneSpeciesMedia(src *model.SpeciesMedia) *model.SpeciesMedia {
 	if src == nil {
 		return nil
@@ -69,56 +71,96 @@ func (c *Client) FetchSpeciesGuideMediaProgressive(ctx context.Context, sciName,
 		onPartial(snap)
 	}
 
-	// 1. iNaturalist 物种信息与标准配图（优先精确匹配拉丁学名，避免误命中亚种或近缘种）
+	// 1. iNaturalist 物种信息与标准配图（优先精确匹配拉丁学名，并深度拉取 /taxa/{id} 完整精选图集与研究级野外照）
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		subCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		subCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
 		defer cancel()
 		trimmedSci := strings.TrimSpace(sciName)
-		u := fmt.Sprintf("%s/taxa?q=%s&rank=species&per_page=5&locale=zh-CN",
-			c.INatBaseURL, url.QueryEscape(trimmedSci))
+		trimmedCom := strings.TrimSpace(comName)
+
 		var resp inatTaxaResp
-		if err := c.getJSON(subCtx, u, nil, &resp); err != nil || len(resp.Results) == 0 {
+		searchURL := fmt.Sprintf("%s/taxa?q=%s&rank=species&per_page=5&locale=zh-CN",
+			c.INatBaseURL, url.QueryEscape(trimmedSci))
+		_ = c.getJSON(subCtx, searchURL, nil, &resp)
+		if len(resp.Results) == 0 && trimmedCom != "" {
+			fbURL := fmt.Sprintf("%s/taxa?q=%s&iconic_taxa=Aves&rank=species&per_page=5&locale=zh-CN",
+				c.INatBaseURL, url.QueryEscape(trimmedCom))
+			_ = c.getJSON(subCtx, fbURL, nil, &resp)
+		}
+		if len(resp.Results) == 0 {
 			return
 		}
-		taxon := resp.Results[0]
-		for _, candidate := range resp.Results {
-			if strings.EqualFold(strings.TrimSpace(candidate.Name), trimmedSci) {
-				taxon = candidate
-				break
-			}
-		}
+
+		taxon := selectBestInatTaxon(resp.Results, trimmedSci, trimmedCom)
 		mu.Lock()
 		res.INatTaxonID = taxon.ID
 		res.INatURL = fmt.Sprintf("https://www.inaturalist.org/taxa/%d", taxon.ID)
 		res.INatObservationsCount = taxon.ObservationsCount
-		if taxon.DefaultPhoto.MediumURL != "" {
-			res.Photos = append(res.Photos, model.MediaPhoto{
-				URL:         strings.Replace(taxon.DefaultPhoto.MediumURL, "medium.", "large.", 1),
-				ThumbURL:    taxon.DefaultPhoto.MediumURL,
-				Attribution: fallbackStr(taxon.DefaultPhoto.Attribution, "iNaturalist"),
-				License:     taxon.DefaultPhoto.LicenseCode,
-				Source:      "iNaturalist",
-			})
-		}
+		appendTaxonMediaPhoto(&res.Photos, taxon.DefaultPhoto.MediumURL, taxon.DefaultPhoto.Attribution, taxon.DefaultPhoto.LicenseCode, maxGuidePhotos)
 		for _, tp := range taxon.TaxonPhotos {
-			if tp.Photo.MediumURL == "" || len(res.Photos) >= 5 {
-				continue
-			}
-			large := strings.Replace(tp.Photo.MediumURL, "medium.", "large.", 1)
-			if !hasPhotoURL(res.Photos, large) {
-				res.Photos = append(res.Photos, model.MediaPhoto{
-					URL:         large,
-					ThumbURL:    tp.Photo.MediumURL,
-					Attribution: fallbackStr(tp.Photo.Attribution, "iNaturalist"),
-					License:     tp.Photo.LicenseCode,
-					Source:      "iNaturalist",
-				})
-			}
+			appendTaxonMediaPhoto(&res.Photos, tp.Photo.MediumURL, tp.Photo.Attribution, tp.Photo.LicenseCode, maxGuidePhotos)
 		}
+		curPhotoCount := len(res.Photos)
 		mu.Unlock()
 		emitPartial()
+
+		// 1b. iNaturalist /v1/taxa?q= 搜索接口不返回 taxon_photos，需请求 /v1/taxa/{id} 获取完整官方精选多图（通常 10-12 张）
+		if taxon.ID > 0 && curPhotoCount < maxGuidePhotos {
+			detailCtx, detailCancel := context.WithTimeout(subCtx, 4500*time.Millisecond)
+			detailURL := fmt.Sprintf("%s/taxa/%d?locale=zh-CN", c.INatBaseURL, taxon.ID)
+			var detailResp inatTaxaResp
+			err := c.getJSON(detailCtx, detailURL, nil, &detailResp)
+			detailCancel()
+			if err == nil && len(detailResp.Results) > 0 {
+				dt := detailResp.Results[0]
+				mu.Lock()
+				added := false
+				if appendTaxonMediaPhoto(&res.Photos, dt.DefaultPhoto.MediumURL, dt.DefaultPhoto.Attribution, dt.DefaultPhoto.LicenseCode, maxGuidePhotos) {
+					added = true
+				}
+				for _, tp := range dt.TaxonPhotos {
+					if appendTaxonMediaPhoto(&res.Photos, tp.Photo.MediumURL, tp.Photo.Attribution, tp.Photo.LicenseCode, maxGuidePhotos) {
+						added = true
+					}
+				}
+				curPhotoCount = len(res.Photos)
+				mu.Unlock()
+				if added {
+					emitPartial()
+				}
+			}
+		}
+
+		// 1c. 若精选图仍不足 10 张，补充该物种高赞研究级（research grade）野外生态照（不依赖 sounds=true）
+		if taxon.ID > 0 && curPhotoCount < 10 {
+			obsCtx, obsCancel := context.WithTimeout(subCtx, 4500*time.Millisecond)
+			obsURL := fmt.Sprintf("%s/observations?taxon_id=%d&photos=true&quality_grade=research&per_page=10&order_by=votes",
+				c.INatBaseURL, taxon.ID)
+			var obsResp inatObsResp
+			err := c.getJSON(obsCtx, obsURL, nil, &obsResp)
+			obsCancel()
+			if err == nil && len(obsResp.Results) > 0 {
+				mu.Lock()
+				added := false
+				for _, obs := range obsResp.Results {
+					if len(res.Photos) >= maxGuidePhotos {
+						break
+					}
+					for _, p := range obs.Photos {
+						if appendObsMediaPhoto(&res.Photos, p.URL, p.Attribution, p.LicenseCode, maxGuidePhotos) {
+							added = true
+							break
+						}
+					}
+				}
+				mu.Unlock()
+				if added {
+					emitPartial()
+				}
+			}
+		}
 	}()
 
 	// 2. iNaturalist 鸟鸣实录（免 Key）+ 补充图集
@@ -135,21 +177,9 @@ func (c *Client) FetchSpeciesGuideMediaProgressive(ctx context.Context, sciName,
 		}
 		mu.Lock()
 		for _, obs := range resp.Results {
-			if len(res.Photos) < 5 {
+			if len(res.Photos) < maxGuidePhotos {
 				for _, p := range obs.Photos {
-					if p.URL == "" {
-						continue
-					}
-					large := strings.Replace(p.URL, "square.", "large.", 1)
-					thumb := strings.Replace(p.URL, "square.", "medium.", 1)
-					if !hasPhotoURL(res.Photos, large) {
-						res.Photos = append(res.Photos, model.MediaPhoto{
-							URL:         large,
-							ThumbURL:    thumb,
-							Attribution: fallbackStr(p.Attribution, "iNaturalist"),
-							License:     p.LicenseCode,
-							Source:      "iNaturalist",
-						})
+					if appendObsMediaPhoto(&res.Photos, p.URL, p.Attribution, p.LicenseCode, maxGuidePhotos) {
 						break
 					}
 				}
@@ -335,22 +365,123 @@ func (c *Client) FetchRegionalPhotoObservations(ctx context.Context, lat, lng fl
 
 // FetchSpeciesThumb 为图鉴列表条目按需获取物种代表缩略图，严格核对拉丁学名避免张冠李戴。
 func (c *Client) FetchSpeciesThumb(ctx context.Context, sciName string) (string, error) {
-	trimmed := strings.TrimSpace(sciName)
-	if trimmed == "" {
+	return c.FetchSpeciesThumbWithFallback(ctx, sciName, "")
+}
+
+// FetchSpeciesThumbWithFallback 获取物种缩略图：优先精确匹配拉丁学名；若发生分类学异名拆并则按中文名/鸟纲候选兜底。
+func (c *Client) FetchSpeciesThumbWithFallback(ctx context.Context, sciName, comName string) (string, error) {
+	trimmedSci := strings.TrimSpace(sciName)
+	trimmedCom := strings.TrimSpace(comName)
+	if trimmedSci == "" && trimmedCom == "" {
 		return "", nil
 	}
-	u := fmt.Sprintf("%s/taxa?q=%s&rank=species&per_page=3&locale=zh-CN",
-		c.INatBaseURL, url.QueryEscape(trimmed))
-	var resp inatTaxaResp
-	if err := c.getJSON(ctx, u, nil, &resp); err != nil {
-		return "", err
+	if trimmedSci != "" {
+		u := fmt.Sprintf("%s/taxa?q=%s&rank=species&per_page=5&locale=zh-CN",
+			c.INatBaseURL, url.QueryEscape(trimmedSci))
+		var resp inatTaxaResp
+		err := c.getJSON(ctx, u, nil, &resp)
+		if err != nil {
+			if trimmedCom == "" {
+				return "", err
+			}
+		} else {
+			for _, taxon := range resp.Results {
+				if strings.EqualFold(strings.TrimSpace(taxon.Name), trimmedSci) && taxon.DefaultPhoto.MediumURL != "" {
+					return strings.Replace(taxon.DefaultPhoto.MediumURL, "/medium.", "/small.", 1), nil
+				}
+			}
+			// 异名或拼写差异兜底（同一中文名或唯一 Aves 候选）
+			for _, taxon := range resp.Results {
+				if taxon.DefaultPhoto.MediumURL == "" {
+					continue
+				}
+				if trimmedCom != "" && strings.EqualFold(strings.TrimSpace(taxon.PreferredCommonName), trimmedCom) {
+					return strings.Replace(taxon.DefaultPhoto.MediumURL, "/medium.", "/small.", 1), nil
+				}
+			}
+			if trimmedCom != "" {
+				for _, taxon := range resp.Results {
+					if strings.EqualFold(taxon.IconicTaxonName, "Aves") && taxon.DefaultPhoto.MediumURL != "" {
+						return strings.Replace(taxon.DefaultPhoto.MediumURL, "/medium.", "/small.", 1), nil
+					}
+				}
+			}
+		}
 	}
-	for _, taxon := range resp.Results {
-		if strings.EqualFold(strings.TrimSpace(taxon.Name), trimmed) && taxon.DefaultPhoto.MediumURL != "" {
-			return strings.Replace(taxon.DefaultPhoto.MediumURL, "/medium.", "/small.", 1), nil
+	if trimmedCom != "" {
+		u := fmt.Sprintf("%s/taxa?q=%s&iconic_taxa=Aves&rank=species&per_page=5&locale=zh-CN",
+			c.INatBaseURL, url.QueryEscape(trimmedCom))
+		var resp inatTaxaResp
+		if err := c.getJSON(ctx, u, nil, &resp); err == nil {
+			for _, taxon := range resp.Results {
+				if taxon.DefaultPhoto.MediumURL == "" {
+					continue
+				}
+				if strings.EqualFold(strings.TrimSpace(taxon.PreferredCommonName), trimmedCom) || strings.EqualFold(taxon.IconicTaxonName, "Aves") {
+					return strings.Replace(taxon.DefaultPhoto.MediumURL, "/medium.", "/small.", 1), nil
+				}
+			}
+		} else {
+			return "", err
 		}
 	}
 	return "", nil
+}
+
+func selectBestInatTaxon(results []inatTaxonItem, trimmedSci, trimmedCom string) inatTaxonItem {
+	for _, candidate := range results {
+		if trimmedSci != "" && strings.EqualFold(strings.TrimSpace(candidate.Name), trimmedSci) {
+			return candidate
+		}
+	}
+	for _, candidate := range results {
+		if trimmedCom != "" && strings.EqualFold(strings.TrimSpace(candidate.PreferredCommonName), trimmedCom) {
+			return candidate
+		}
+	}
+	for _, candidate := range results {
+		if strings.EqualFold(strings.TrimSpace(candidate.IconicTaxonName), "Aves") {
+			return candidate
+		}
+	}
+	return results[0]
+}
+
+func appendTaxonMediaPhoto(photos *[]model.MediaPhoto, mediumURL, attribution, license string, maxCount int) bool {
+	if mediumURL == "" || len(*photos) >= maxCount {
+		return false
+	}
+	large := strings.Replace(mediumURL, "medium.", "large.", 1)
+	if hasPhotoURL(*photos, large) {
+		return false
+	}
+	*photos = append(*photos, model.MediaPhoto{
+		URL:         large,
+		ThumbURL:    mediumURL,
+		Attribution: fallbackStr(attribution, "iNaturalist"),
+		License:     license,
+		Source:      "iNaturalist",
+	})
+	return true
+}
+
+func appendObsMediaPhoto(photos *[]model.MediaPhoto, rawURL, attribution, license string, maxCount int) bool {
+	if rawURL == "" || len(*photos) >= maxCount {
+		return false
+	}
+	large := strings.Replace(rawURL, "square.", "large.", 1)
+	thumb := strings.Replace(rawURL, "square.", "medium.", 1)
+	if hasPhotoURL(*photos, large) {
+		return false
+	}
+	*photos = append(*photos, model.MediaPhoto{
+		URL:         large,
+		ThumbURL:    thumb,
+		Attribution: fallbackStr(attribution, "iNaturalist"),
+		License:     license,
+		Source:      "iNaturalist",
+	})
+	return true
 }
 
 func hasPhotoURL(list []model.MediaPhoto, u string) bool {
@@ -377,24 +508,28 @@ func fallbackStr(v, fb string) string {
 	return fb
 }
 
-type inatTaxaResp struct {
-	Results []struct {
-		ID                int    `json:"id"`
-		Name              string `json:"name"`
-		ObservationsCount int    `json:"observations_count"`
-		DefaultPhoto      struct {
+type inatTaxonItem struct {
+	ID                  int    `json:"id"`
+	Name                string `json:"name"`
+	PreferredCommonName string `json:"preferred_common_name"`
+	IconicTaxonName     string `json:"iconic_taxon_name"`
+	ObservationsCount   int    `json:"observations_count"`
+	DefaultPhoto        struct {
+		MediumURL   string `json:"medium_url"`
+		Attribution string `json:"attribution"`
+		LicenseCode string `json:"license_code"`
+	} `json:"default_photo"`
+	TaxonPhotos []struct {
+		Photo struct {
 			MediumURL   string `json:"medium_url"`
 			Attribution string `json:"attribution"`
 			LicenseCode string `json:"license_code"`
-		} `json:"default_photo"`
-		TaxonPhotos []struct {
-			Photo struct {
-				MediumURL   string `json:"medium_url"`
-				Attribution string `json:"attribution"`
-				LicenseCode string `json:"license_code"`
-			} `json:"photo"`
-		} `json:"taxon_photos"`
-	} `json:"results"`
+		} `json:"photo"`
+	} `json:"taxon_photos"`
+}
+
+type inatTaxaResp struct {
+	Results []inatTaxonItem `json:"results"`
 }
 
 type inatGeoJSON struct {

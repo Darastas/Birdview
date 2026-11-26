@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/Darastas/Birdview/internal/audioctl"
 	"github.com/Darastas/Birdview/internal/model"
 	"github.com/Darastas/Birdview/internal/store"
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -1218,5 +1221,273 @@ func TestSeasonalBirdingGuideCenteredTabDetailAndMemos(t *testing.T) {
 	advanceUI(tt, 500*time.Millisecond)
 	if !app.seasonalMemoSheet || !tt.HasText("标为已见") || !tt.HasText("定日历") {
 		t.Fatalf("expected memo sheet open with 标为已见 and 定日历 actions, open=%v texts=%q", app.seasonalMemoSheet, tt.Texts())
+	}
+}
+
+func TestExploreSubTabKeepAliveCache(t *testing.T) {
+	var photoCalls, recentCalls, notableCalls, hotspotCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/observations" && r.URL.Query().Get("lat") != "":
+			photoCalls.Add(1)
+			w.Write([]byte(`{"results":[{"id":101,"observed_on":"2026-11-26","place_guess":"沙河水库","quality_grade":"research","taxon":{"name":"Alcedo atthis","preferred_common_name":"普通翠鸟"},"user":{"name":"摄影师"},"photos":[{"url":"https://example.com/p1_square.jpg"}]}]}`))
+		case strings.Contains(r.URL.Path, "/recent/notable"):
+			notableCalls.Add(1)
+			w.Write([]byte(`[{"speciesCode":"sibcra1","comName":"白鹤","sciName":"Leucogeranus leucogeranus","locId":"L2","locName":"鄱阳湖","obsDt":"2026-11-26 07:30","howMany":5,"subId":"SN1"}]`))
+		case strings.HasSuffix(r.URL.Path, "/recent"):
+			recentCalls.Add(1)
+			w.Write([]byte(`[{"speciesCode":"hoopoe","comName":"戴胜","sciName":"Upupa epops","locId":"L1","locName":"奥森","obsDt":"2026-11-26 08:00","howMany":1,"subId":"SR1"}]`))
+		case strings.Contains(r.URL.Path, "/ref/hotspot/"):
+			hotspotCalls.Add(1)
+			w.Write([]byte(`[{"locId":"L1","locName":"奥林匹克森林公园","subnational1Code":"CN-11","latestObsDt":"2026-11-26","numSpeciesAllTime":310}]`))
+		default:
+			w.Write([]byte(`{}`))
+		}
+	}))
+	defer srv.Close()
+
+	app := newTestAppState(t)
+	app.client.INatBaseURL = srv.URL
+	app.client.EBirdBaseURL = srv.URL
+	if err := app.store.SaveEbirdKey("keep-alive-key"); err != nil {
+		t.Fatal(err)
+	}
+
+	tt := ui.NewTester(app.View, 402, 844)
+	if err := tt.Click("探索"); err != nil {
+		t.Fatal(err)
+	}
+	app.EnsureExploreSubTabLoaded()
+	for range 30 {
+		advanceUI(tt, 30*time.Millisecond)
+		if !app.regPhotoBusy && len(app.regFieldPhotos) > 0 {
+			break
+		}
+	}
+	if photoCalls.Load() != 1 || len(app.regFieldPhotos) != 1 {
+		t.Fatalf("expected 1 field-photo fetch, calls=%d len=%d err=%q", photoCalls.Load(), len(app.regFieldPhotos), app.regPhotoErr)
+	}
+
+	// 依次切入 近期目击 -> 珍稀记录 -> 观鸟热点（每页首次加载 1 次）
+	if err := tt.Click("近期目击"); err != nil {
+		t.Fatal(err)
+	}
+	for range 30 {
+		advanceUI(tt, 30*time.Millisecond)
+		if !app.regObsBusy && len(app.regObsList) > 0 {
+			break
+		}
+	}
+	if err := tt.Click("珍稀记录"); err != nil {
+		t.Fatal(err)
+	}
+	for range 30 {
+		advanceUI(tt, 30*time.Millisecond)
+		if !app.regNotableBusy && len(app.regNotableList) > 0 {
+			break
+		}
+	}
+	if err := tt.Click("观鸟热点"); err != nil {
+		t.Fatal(err)
+	}
+	for range 30 {
+		advanceUI(tt, 30*time.Millisecond)
+		if !app.hsBusy && len(app.hsAll) > 0 {
+			break
+		}
+	}
+
+	if recentCalls.Load() != 1 || notableCalls.Load() != 1 || hotspotCalls.Load() != 1 {
+		t.Fatalf("expected 1 load per subtab initially: photo=%d recent=%d notable=%d hotspot=%d",
+			photoCalls.Load(), recentCalls.Load(), notableCalls.Load(), hotspotCalls.Load())
+	}
+
+	// 再次在 4 个子页间反复切换，绝不能触发重复请求
+	for _, tabName := range []string{"现场实拍", "近期目击", "珍稀记录", "观鸟热点", "现场实拍"} {
+		if err := tt.Click(tabName); err != nil {
+			t.Fatal(err)
+		}
+		advanceUI(tt, 120*time.Millisecond)
+	}
+	if photoCalls.Load() != 1 || recentCalls.Load() != 1 || notableCalls.Load() != 1 || hotspotCalls.Load() != 1 {
+		t.Fatalf("expected 0 duplicate requests on subtab switches: photo=%d recent=%d notable=%d hotspot=%d",
+			photoCalls.Load(), recentCalls.Load(), notableCalls.Load(), hotspotCalls.Load())
+	}
+
+	// 切换探索地区后，缓存 key 失效并重新拉取
+	app.regRegionLabel = "上海"
+	app.resetExploreForRegionChange()
+	for range 30 {
+		advanceUI(tt, 30*time.Millisecond)
+		if !app.regPhotoBusy && len(app.regFieldPhotos) > 0 {
+			break
+		}
+	}
+	if photoCalls.Load() != 2 {
+		t.Fatalf("expected region change to invalidate cache and re-fetch, photoCalls=%d", photoCalls.Load())
+	}
+}
+
+func TestSettingsHapticsSwitchAndPersistence(t *testing.T) {
+	defer mygo.Haptics.SetEnabled(true)
+
+	app := newTestAppState(t)
+	tt := ui.NewTester(app.View, 402, 844)
+	if err := tt.Click("设置"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 150*time.Millisecond)
+
+	if !tt.HasText("v1.0.0") || !tt.HasText("按键震动") {
+		t.Fatalf("expected v1.0.0 and 按键震动 row in settings, texts=%q", tt.Texts())
+	}
+	if !mygo.Haptics.Enabled() || app.store.Settings().HapticsDisabled {
+		t.Fatal("expected haptics enabled by default")
+	}
+
+	if err := tt.Click("按键震动开关"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 200*time.Millisecond)
+	if mygo.Haptics.Enabled() || !app.store.Settings().HapticsDisabled {
+		t.Fatalf("expected haptics disabled after switch toggle, enabled=%v disabledSetting=%v",
+			mygo.Haptics.Enabled(), app.store.Settings().HapticsDisabled)
+	}
+
+	if err := tt.Click("按键震动开关"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 200*time.Millisecond)
+	if !mygo.Haptics.Enabled() || app.store.Settings().HapticsDisabled {
+		t.Fatalf("expected haptics re-enabled on second toggle, enabled=%v disabledSetting=%v",
+			mygo.Haptics.Enabled(), app.store.Settings().HapticsDisabled)
+	}
+}
+
+func TestGuideMediaCacheAutoHealsSparsePhotos(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/taxa":
+			q := r.URL.Query().Get("q")
+			if strings.Contains(q, "Aix") || strings.Contains(q, "鸳鸯") {
+				http.Error(w, "upstream busy", http.StatusInternalServerError)
+				return
+			}
+			w.Write([]byte(`{"results":[{"id":6921,"name":"Cygnus cygnus","default_photo":{"medium_url":"https://static.inaturalist.org/photos/10/medium.jpg"}}]}`))
+		case "/taxa/6921":
+			w.Write([]byte(`{"results":[{"id":6921,"name":"Cygnus cygnus","taxon_photos":[
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/11/medium.jpg"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/12/medium.jpg"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/13/medium.jpg"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/14/medium.jpg"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/15/medium.jpg"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/16/medium.jpg"}},
+				{"photo":{"medium_url":"https://static.inaturalist.org/photos/17/medium.jpg"}}
+			]}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	app := newTestAppState(t)
+	app.client.INatBaseURL = srv.URL
+	app.client.WikiBaseURL = srv.URL
+
+	// 1. 预埋旧版仅含 1 张图的稀疏磁盘缓存，应当自动在后台补齐到 8 张图
+	if err := app.cache.SaveSpeciesMedia("whoswa", &model.SpeciesMedia{
+		SciName: "Cygnus cygnus",
+		ComName: "大天鹅",
+		Photos:  []model.MediaPhoto{{URL: "https://static.inaturalist.org/photos/10/large.jpg"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app.ensureGuideMediaLoaded(model.Taxon{SpeciesCode: "whoswa", ComName: "大天鹅", SciName: "Cygnus cygnus"})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !app.guideMediaBusy["whoswa"] {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	healed := app.guideMediaMap["whoswa"]
+	if healed == nil || len(healed.Photos) < 8 {
+		t.Fatalf("expected sparse cache auto-healed to >=8 photos, got %+v", healed)
+	}
+	if disk, ok := app.cache.LoadSpeciesMedia("whoswa", time.Hour); !ok || len(disk.Photos) < 8 {
+		t.Fatalf("expected healed multi-photo media saved to disk, ok=%v disk=%+v", ok, disk)
+	}
+
+	// 2. 上游拉取照片全失败（0 图）绝不能写入磁盘缓存污染后续加载
+	app.ensureGuideMediaLoaded(model.Taxon{SpeciesCode: "manduc", ComName: "鸳鸯", SciName: "Aix galericulata"})
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !app.guideMediaBusy["manduc"] {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if _, poisoned := app.cache.LoadSpeciesMedia("manduc", time.Hour); poisoned {
+		t.Fatal("expected 0-photo fetch failure NOT saved to 7-day disk cache")
+	}
+}
+
+func TestMultiDetentSheetBottomSafeAreaClearance(t *testing.T) {
+	app := newTestAppState(t)
+	// 填充足够多鸟科分类，确保「目科筛选」卡片内容在 0.68 挡位下需要纵向滚动
+	taxa := make([]model.Taxon, 36)
+	china := make(map[string]bool, 36)
+	for i := range taxa {
+		code := string([]byte{'z', 't', byte('a' + i/26), byte('a' + i%26)})
+		fam := string([]byte{'Z', 'F', 'a', 'm', byte('A' + i/26), byte('A' + i%26), 'i', 'd', 'a', 'e'})
+		taxa[i] = model.Taxon{
+			SpeciesCode:   code,
+			ComName:       "测试鸟" + code,
+			SciName:       "Testus " + code,
+			Order:         "Passeriformes",
+			FamilySciName: fam,
+		}
+		china[code] = true
+	}
+	app.SetTaxonomy(taxa, china, nil, "CN-11")
+
+	tt := ui.NewTester(app.View, 402, 844)
+	tt.SetInsets(44, 0, 28, 0) // 模拟 28dp Android 底部小白条安全区
+
+	// 1. 测试「选择观鸟地区」两段式抽屉（0.72 / 0.92）默认中段高度拉到底部时，最后一项高于小白条
+	app.regRegionTarget = "explore"
+	app.regRegionSheetOpen = true
+	tt.Frame()
+	advanceUI(tt, 600*time.Millisecond)
+	for range 8 {
+		touchSwipe(tt, 200, 620, 200, 140, 8)
+		advanceUI(tt, 250*time.Millisecond)
+	}
+	lastRegion := api.ChinaRegions[len(api.ChinaRegions)-1].Name
+	regRect, ok := tt.Find(lastRegion)
+	if !ok {
+		t.Fatalf("expected last region %q reachable at bottom of sheet, texts=%q", lastRegion, tt.Texts())
+	}
+	if regRect.Y+regRect.H > 844-28 {
+		t.Fatalf("expected last region %q above 28dp bottom safe area (maxY<=816), got rect=%+v", lastRegion, regRect)
+	}
+	app.regRegionSheetOpen = false
+	advanceUI(tt, 600*time.Millisecond)
+
+	// 2. 测试「目科筛选」两段式抽屉（0.68 / 0.90）默认中段高度拉到底部时，最后一个科胶囊高于小白条
+	app.guideFilterSheet = true
+	tt.Frame()
+	advanceUI(tt, 600*time.Millisecond)
+	for range 6 {
+		touchSwipe(tt, 200, 620, 200, 160, 8)
+		advanceUI(tt, 250*time.Millisecond)
+	}
+	lastFam := app.guideFamilies[len(app.guideFamilies)-1]
+	famRect, ok := tt.Find(lastFam)
+	if !ok {
+		t.Fatalf("expected last family %q visible after scroll, texts=%q", lastFam, tt.Texts())
+	}
+	if famRect.Y+famRect.H > 844-28 {
+		t.Fatalf("expected last family %q above 28dp bottom safe area (maxY<=816), got rect=%+v", lastFam, famRect)
 	}
 }

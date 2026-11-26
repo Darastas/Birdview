@@ -20,7 +20,10 @@ import (
 	"github.com/egoist/mygo/ui/netimage"
 )
 
-const maxMemLocalImages = 24
+const (
+	maxMemLocalImages  = 24
+	speciesThumbMaxSide = 420
+)
 
 var tabRoutes = []string{"/guide", "/explore", "/seasonal", "/journal", "/settings"}
 
@@ -75,6 +78,7 @@ type AppState struct {
 	taxaErr        string
 	thumbMap       map[string]string
 	thumbTried     map[string]bool
+	thumbFailAt    map[string]time.Time
 	thumbSem       chan struct{}
 	thumbPending   int
 
@@ -90,10 +94,11 @@ type AppState struct {
 	guideFilterSheet bool
 	guideFilterQuery string
 	guideScopeSheet  bool
-	guideActiveCode  string
-	guideMediaMap    map[string]*model.SpeciesMedia
-	guideMediaBusy   map[string]bool
-	guideGallery     mobile.PageState
+	guideActiveCode   string
+	guideMediaMap     map[string]*model.SpeciesMedia
+	guideMediaBusy    map[string]bool
+	guideMediaAttempt map[string]time.Time
+	guideGallery      mobile.PageState
 
 	// 区域探索（现场实拍 + eBird 观测 + 热点）
 	regionalRegion     string
@@ -106,25 +111,33 @@ type AppState struct {
 	regGPSBusy         bool
 	regGPSNote         string
 
-	regObsBusy       bool
-	regObsErr        string
-	regObsList       []model.Observation
-	regObsSeq        uint64
-	regActiveSubID   string
-	regActiveObsID   string
-	regSelectedObs   *model.Observation
-	regStat          *model.RegionStat
-	regChecklistMap  map[string]*model.ChecklistDetail
-	regChecklistBusy map[string]bool
+	regObsBusy          bool
+	regObsErr           string
+	regObsList          []model.Observation
+	regObsSeq           uint64
+	regObsLoadedKey     string
+	regNotableBusy      bool
+	regNotableErr       string
+	regNotableList      []model.Observation
+	regNotableSeq       uint64
+	regNotableLoadedKey string
+	regActiveSubID      string
+	regActiveObsID      string
+	regSelectedObs      *model.Observation
+	regStat             *model.RegionStat
+	regStatKey          string
+	regChecklistMap     map[string]*model.ChecklistDetail
+	regChecklistBusy    map[string]bool
 
-	regPhotoBusy   bool
-	regPhotoErr    string
-	regFieldPhotos []model.FieldPhotoObs
-	regPhotoSeq    uint64
-	regPhotoPager  mobile.PageState
-	regActivePhoto *model.FieldPhotoObs
-	exploreRefresh ui.RefreshState
-	exploreScroll  [4]ui.ScrollState
+	regPhotoBusy      bool
+	regPhotoErr       string
+	regFieldPhotos    []model.FieldPhotoObs
+	regPhotoSeq       uint64
+	regPhotoLoadedKey string
+	regPhotoPager     mobile.PageState
+	regActivePhoto    *model.FieldPhotoObs
+	exploreRefresh    ui.RefreshState
+	exploreScroll     [4]ui.ScrollState
 
 	hsRegionLabel string
 	hsQuery       string
@@ -134,6 +147,7 @@ type AppState struct {
 	hsAll         []model.Hotspot
 	hsFiltered    []model.Hotspot
 	hsSeq         uint64
+	hsLoadedKey   string
 	hsActiveSpot  *model.Hotspot
 	hsObsMap      map[string][]model.Observation
 	hsObsBusy     map[string]bool
@@ -189,6 +203,7 @@ type AppState struct {
 	cacheStatsFiles   int
 	localDataBytes    int64
 	lastBarStyle      mygo.BarStyle
+	lastHapticAt      time.Time
 
 	// 底部悬浮导航栏随滚动自动收起/展开状态
 	dockHidden      bool
@@ -203,6 +218,7 @@ type AppState struct {
 	seasonalTab         int // 0=马上离开, 1=当季, 2=刚到, 3=马上到
 	seasonalRegionCode  string
 	seasonalRegionLabel string
+	seasonalList        ui.ListState
 	seasonalScroll      ui.ScrollState
 	seasonalMemoSheet   bool
 
@@ -257,11 +273,13 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client, sess *
 		regionCodes:      make(map[string]bool),
 		thumbMap:         thumbs,
 		thumbTried:       make(map[string]bool),
-		thumbSem:         make(chan struct{}, 12),
-		guideOrder:       "全部目",
-		guideFamily:      "全部科",
-		guideMediaMap:    make(map[string]*model.SpeciesMedia),
-		guideMediaBusy:   make(map[string]bool),
+		thumbFailAt:      make(map[string]time.Time),
+		thumbSem:         make(chan struct{}, 5),
+		guideOrder:        "全部目",
+		guideFamily:       "全部科",
+		guideMediaMap:     make(map[string]*model.SpeciesMedia),
+		guideMediaBusy:    make(map[string]bool),
+		guideMediaAttempt: make(map[string]time.Time),
 		regionalRegion:   cfg.DefaultRegion,
 		regRegionLabel:   regionLabelByCode(cfg.DefaultRegion),
 		regBackLabel:     "14天",
@@ -283,6 +301,7 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client, sess *
 		Bounce:    0,
 		Precision: 0.002,
 	}}
+	mygo.Haptics.SetEnabled(!cfg.HapticsDisabled)
 	a.syncSettingsDraft()
 	a.refreshJournalList()
 	a.refreshStorageStats()
@@ -301,16 +320,44 @@ func (a *AppState) SetRecorder(rec audioctl.Recorder) {
 	a.recorder = rec
 }
 
-func (a *AppState) hapticSelection() {
-	if a.win != nil {
-		mygo.Haptics.Selection()
+func (a *AppState) hapticsEnabled() bool {
+	return a.store == nil || !a.store.Settings().HapticsDisabled
+}
+
+var activeHapticTap func()
+
+func triggerHapticTap() {
+	if activeHapticTap != nil {
+		activeHapticTap()
 	}
 }
 
-func (a *AppState) hapticSuccess() {
-	if a.win != nil {
-		mygo.Haptics.Success()
+func hapticClick(el ui.Element) bool {
+	if el.Clicked() {
+		triggerHapticTap()
+		return true
 	}
+	return false
+}
+
+func (a *AppState) hapticSelection() {
+	if a.win == nil || !a.hapticsEnabled() {
+		return
+	}
+	now := time.Now()
+	if !a.lastHapticAt.IsZero() && now.Sub(a.lastHapticAt) < 25*time.Millisecond {
+		return
+	}
+	a.lastHapticAt = now
+	mygo.Haptics.Selection()
+}
+
+func (a *AppState) hapticSuccess() {
+	if a.win == nil || !a.hapticsEnabled() {
+		return
+	}
+	a.lastHapticAt = time.Now()
+	mygo.Haptics.Success()
 }
 
 func (a *AppState) updateUI(fn func()) {
@@ -354,11 +401,9 @@ func (a *AppState) SelectTab(idx int) {
 
 func (a *AppState) onTabActivated(idx int) {
 	switch idx {
-	case 1: // 探索
-		if a.win != nil && !a.regObsBusy && !a.regPhotoBusy && !a.hsBusy {
-			if len(a.regFieldPhotos) == 0 && len(a.regObsList) == 0 && len(a.hsAll) == 0 {
-				a.LoadExploreData()
-			}
+	case 1: // 探索（已缓存的子页不再重复加载）
+		if a.win != nil {
+			a.EnsureExploreSubTabLoaded()
 		}
 	case 4: // 设置
 		a.refreshStorageStats()
@@ -443,6 +488,7 @@ func (a *AppState) syncDockAutoHide(curPath string, rootView, modalOpen bool) {
 
 func (a *AppState) goBack() {
 	if a.router.CanGoBack() {
+		triggerHapticTap()
 		a.router.Back()
 	}
 }
@@ -466,6 +512,11 @@ func (a *AppState) refreshStorageStats() {
 
 // View 是移动端根视图函数（遵守每帧只声明构建的规则）。
 func (a *AppState) View(c *ui.Context) {
+	if a.win != nil && a.hapticsEnabled() {
+		activeHapticTap = a.hapticSelection
+	} else {
+		activeHapticTap = nil
+	}
 	t := applyAppTheme(c)
 	modalOpen := a.hasModalOpen()
 
@@ -620,7 +671,7 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme, aboveDock, obsc
 					}),
 					t,
 				)
-				if playBtn.Clicked() {
+				if hapticClick(playBtn) {
 					a.player.TogglePause()
 				}
 			}
@@ -636,7 +687,7 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme, aboveDock, obsc
 				ui.Text(c, sub).FontSize(12).TextColor(secondaryTextColor(t)).SingleLine()
 			})
 
-			if circleIconBtn(c, "mini-stop", "关闭播放器", iconClose, softPillColor(t), t.TextMuted, 28).Clicked() {
+			if hapticClick(circleIconBtn(c, "mini-stop", "关闭播放器", iconClose, softPillColor(t), t.TextMuted, 28)) {
 				a.player.Stop()
 			}
 		})
@@ -644,34 +695,41 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme, aboveDock, obsc
 }
 
 func (a *AppState) queueSpeciesThumb(tx model.Taxon) {
-	if a.win == nil || tx.SpeciesCode == "" || tx.SciName == "" {
+	if a.win == nil || tx.SpeciesCode == "" || (tx.SciName == "" && tx.ComName == "") {
 		return
 	}
 	if _, ok := a.thumbMap[tx.SpeciesCode]; ok || a.thumbTried[tx.SpeciesCode] {
+		return
+	}
+	if failAt, hasFail := a.thumbFailAt[tx.SpeciesCode]; hasFail && time.Since(failAt) < 4*time.Second {
 		return
 	}
 	a.thumbTried[tx.SpeciesCode] = true
 
 	select {
 	case a.thumbSem <- struct{}{}:
-		go func(code, sciName string) {
+		go func(code, sciName, comName string) {
 			defer func() { <-a.thumbSem }()
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			url, err := a.client.FetchSpeciesThumb(ctx, sciName)
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+			url, err := a.client.FetchSpeciesThumbWithFallback(ctx, sciName, comName)
 			cancel()
 
 			a.updateUI(func() {
+				delete(a.thumbTried, code)
 				if err == nil && url != "" {
+					delete(a.thumbFailAt, code)
 					a.thumbMap[code] = url
 					a.thumbPending++
-					if a.cache != nil && a.thumbPending >= 6 {
+					if a.cache != nil && (a.thumbPending >= 4 || len(a.thumbMap) <= 12) {
 						a.thumbPending = 0
 						snapshot := copyStringMap(a.thumbMap)
 						go func() { _ = a.cache.SaveThumbIndex(snapshot) }()
 					}
+					return
 				}
+				a.thumbFailAt[code] = time.Now()
 			})
-		}(tx.SpeciesCode, tx.SciName)
+		}(tx.SpeciesCode, tx.SciName, tx.ComName)
 	default:
 		// 并发上限已满时允许之后再次进入视口重试
 		delete(a.thumbTried, tx.SpeciesCode)
@@ -796,7 +854,7 @@ func (a *AppState) viewPhotoZoomOverlay(c *ui.Context, t *ui.Theme) {
 						ui.Text(c, a.zoomTitle).FontSize(16).FontWeight(600).TextColor(ui.RGB(255, 255, 255)).SingleLine()
 						ui.Textf(c, "第 %d / %d 张", a.zoomPager.Page+1, count).FontSize(12).TextColor(ui.RGBA(255, 255, 255, 0.72))
 					})
-					if circleIconBtn(c, "zoom-close", "关闭大图查看", iconClose, ui.RGBA(255, 255, 255, 0.16), ui.RGB(255, 255, 255), 36).Clicked() {
+					if hapticClick(circleIconBtn(c, "zoom-close", "关闭大图查看", iconClose, ui.RGBA(255, 255, 255, 0.16), ui.RGB(255, 255, 255), 36)) {
 						a.zoomOpen = false
 					}
 				})
