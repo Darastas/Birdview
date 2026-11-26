@@ -190,28 +190,13 @@ func (a *AppState) viewSeasonalHome(c *ui.Context, t *ui.Theme) {
 				})
 			})
 
-			// 1-12 月横滑月份选择器（默认自动滚动到当月所在位置）
-			ui.ScrollHorizontal(c.Key("seasonal-months-strip")).FillWidth().Gap(6).
-				TrackScroll(&a.seasonalMonthScroll).Children(func() {
-				nowM := int(time.Now().Month())
-				for m := 1; m <= 12; m++ {
-					mm := m
-					label := fmt.Sprintf("%d月", mm)
-					if mm == nowM {
-						label = fmt.Sprintf("%d月·今", mm)
-					}
-					if filterPill(c, fmt.Sprintf("sm-%d", mm), label, a.seasonalMonth == mm, t).Clicked() {
-						a.seasonalMonth = mm
-						a.seasonalScroll.Y = 0
-						a.hapticSelection()
-					}
-				}
-			})
-
-			// 时令概览微条
-			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(8).Children(func() {
-				ui.Textf(c, "%s · %s", model.EcoZoneLabel(zone), model.MonthSeasonTheme(a.seasonalMonth)).
-					FontSize(12).TextColor(secondaryTextColor(t)).SingleLine().Grow(1)
+			// 直接展示当月中文名与时令说明（单行紧凑排版，避免“海湿地”三字折到第二行形成孤字）
+			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Baseline).Gap(8).Children(func() {
+				ui.Row(c).Gap(6).AlignItems(ui.Baseline).Grow(1).Basis(0).Children(func() {
+					ui.Text(c, model.MonthZh(a.seasonalMonth)).FontSize(14).FontWeight(600).TextColor(t.Text).Shrink(0)
+					ui.Textf(c, "· %s · %s", model.EcoZoneLabel(zone), model.MonthSeasonTheme(a.seasonalMonth)).
+						FontSize(12).TextColor(secondaryTextColor(t)).SingleLine().Grow(1).Basis(0)
+				})
 				ui.Textf(c, "%d 种", len(birds)).FontSize(12).FontWeight(500).TextColor(t.TextMuted).FontFeatures("tnum").Shrink(0)
 			})
 
@@ -224,7 +209,7 @@ func (a *AppState) viewSeasonalHome(c *ui.Context, t *ui.Theme) {
 
 		// 主体时令鸟种卡片列表
 		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
-			ui.Scroll(c.Key("seasonal-scroll")).Fill().TrackScroll(&a.seasonalScroll).Children(func() {
+			ui.Scroll(c.Key("seasonal-scroll")).Fill().Scrollbars(false).TrackScroll(&a.seasonalScroll).Children(func() {
 				ui.Column(c).FillWidth().Padding(8, 18, dockClearancePad(c, 22), 18).Gap(12).Children(func() {
 					// 分类时令引导语
 					phaseBg, phaseFg := seasonalPhaseColors(activePhase, t.Dark)
@@ -238,9 +223,9 @@ func (a *AppState) viewSeasonalHome(c *ui.Context, t *ui.Theme) {
 							tactileRecessedStyle(ui.Box(c).Size(50, 50), t, 25).Center().Children(func() {
 								ui.Icon(c, iconNavSeasonal).FontSize(22).TextColor(t.TextMuted)
 							})
-							ui.Textf(c, "%d 月%s暂无「%s」重点鸟种", a.seasonalMonth, regionName, activePhase.Label()).
+							ui.Textf(c, "%s%s暂无「%s」重点鸟种", model.MonthZh(a.seasonalMonth), regionName, activePhase.Label()).
 								FontSize(15).FontWeight(600)
-							ui.Text(c, "可以切换其他时令分组，或滑动上方月份查看迁徙高峰期。").
+							ui.Text(c, "可以切换其他时令分组或顶部地区，查看周边重点迁徙鸟种。").
 								FontSize(13).TextColor(t.TextMuted).TextAlign(ui.Center)
 							if a.seasonalTab != 1 && len(grouped[model.PhaseInSeason]) > 0 {
 								if filterPill(c, "seasonal-jump-inseason", fmt.Sprintf("查看当季 %d 种", len(grouped[model.PhaseInSeason])), true, t).Clicked() {
@@ -274,7 +259,6 @@ func (a *AppState) buildSeasonalBirdCard(c *ui.Context, t *ui.Theme, idx int, bi
 		a.queueSpeciesThumb(tx)
 	}
 	hasMemo := a.store.HasActiveMemo(bird.SpeciesCode, a.seasonalMonth)
-	phaseBg, phaseFg := seasonalPhaseColors(phase, t.Dark)
 	blurb := bird.CardSeasonBlurb(phase, a.seasonalMonth, regionName)
 	spotHint := bird.RecommendedSpots(zone)
 
@@ -282,18 +266,13 @@ func (a *AppState) buildSeasonalBirdCard(c *ui.Context, t *ui.Theme, idx int, bi
 		Role(ui.RoleButton).Label(bird.ComName + " 时令详情")
 	card.Children(func() {
 		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Start).Children(func() {
-			// 左侧高清鸟类缩略图
+			// 左侧高清鸟类缩略图（保持干净无遮挡，不重复叠加当前已选中的分类徽标）
 			ui.Box(c).Size(98, 108).Radius(14).Clip().Shrink(0).Background(softPillColor(t)).Children(func() {
 				if thumbSrc != nil {
 					ui.Image(c.Key("simg-"+bird.SpeciesCode), thumbSrc).Fill().Fit(ui.Cover).Label(bird.ComName)
 				} else {
 					skeletonBirdCard(c, 0, 28, t)
 				}
-				// 左下角时令标签微标
-				ui.Row(c).Absolute().Left(6).Bottom(6).Height(20).PaddingX(7).Radius(10).
-					Background(phaseBg).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, phase.Label()).FontSize(10).FontWeight(600).TextColor(phaseFg).SingleLine()
-				})
 			})
 
 			// 右侧时令介绍与快捷备忘
@@ -331,6 +310,7 @@ func (a *AppState) buildSeasonalBirdCard(c *ui.Context, t *ui.Theme, idx int, bi
 	})
 	if card.Clicked() {
 		a.ensureGuideMediaLoaded(tx)
+		a.seasonalDetailMonth = a.seasonalMonth
 		a.router.Push("/seasonal/" + bird.SpeciesCode)
 	}
 }
@@ -350,15 +330,19 @@ func (a *AppState) viewSeasonalDetailPage(c *ui.Context, t *ui.Theme, code strin
 	if a.seasonalMonth < 1 || a.seasonalMonth > 12 {
 		a.seasonalMonth = int(time.Now().Month())
 	}
+	detailMonth := a.seasonalDetailMonth
+	if detailMonth < 1 || detailMonth > 12 {
+		detailMonth = a.seasonalMonth
+	}
 	tx := a.seasonalTaxonFor(bird)
 	a.ensureGuideMediaLoaded(tx)
 
 	regionCode := fallbackText(a.seasonalRegionCode, a.store.Settings().DefaultRegion)
 	regionName := a.seasonalRegionDisplayName()
 	zone := model.RegionCodeToEcoZone(regionCode)
-	phase := bird.PhaseFor(zone, a.seasonalMonth)
+	phase := bird.PhaseFor(zone, detailMonth)
 	cal := bird.MonthCalendar(zone)
-	hasMemo := a.store.HasActiveMemo(bird.SpeciesCode, a.seasonalMonth)
+	hasMemo := a.store.HasActiveMemo(bird.SpeciesCode, detailMonth)
 	transitioning := a.router.Transitioning()
 	top, _, bottom, _ := c.SafeArea()
 
@@ -378,7 +362,7 @@ func (a *AppState) viewSeasonalDetailPage(c *ui.Context, t *ui.Theme, code strin
 		}
 	}
 
-	ui.Scroll(c.Key("sd-scroll-"+code)).Fill().Children(func() {
+	ui.Scroll(c.Key("sd-scroll-"+code)).Fill().Scrollbars(false).Children(func() {
 		ui.Column(c).FillWidth().Padding(0, 0, max(float32(36), bottom+28), 0).Children(func() {
 			// 顶部全出血 Hero 头图
 			ui.Box(c).FillWidth().Height(296 + top*0.35).Background(softPillColor(t)).Clip().Children(func() {
@@ -407,14 +391,14 @@ func (a *AppState) viewSeasonalDetailPage(c *ui.Context, t *ui.Theme, code strin
 					}
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						if liquidGlassCircleBtnFast(c, "sd-share", "分享时令卡片", iconShare, 40, transitioning).Clicked() {
-							a.ShareSeasonalBirdImageAsync(bird, zone, a.seasonalMonth, regionName)
+							a.ShareSeasonalBirdImageAsync(bird, zone, detailMonth, regionName)
 						}
 						bmIc := iconBookmark
 						if hasMemo {
 							bmIc = iconBookmarkFill
 						}
 						if liquidGlassCircleBtnFast(c, "sd-bm-top", "加入追鸟备忘", bmIc, 40, transitioning).Clicked() {
-							a.toggleSeasonalBirdMemo(c, bird, zone, a.seasonalMonth, regionName)
+							a.toggleSeasonalBirdMemo(c, bird, zone, detailMonth, regionName)
 						}
 					})
 				})
@@ -425,7 +409,7 @@ func (a *AppState) viewSeasonalDetailPage(c *ui.Context, t *ui.Theme, code strin
 					transitioning, false,
 				).Children(func() {
 					ui.Icon(c, iconNavSeasonal).FontSize(12).TextColor(ui.RGB(255, 255, 255))
-					ui.Textf(c, "%d 月 · %s（%s）", a.seasonalMonth, regionName, model.EcoZoneLabel(zone)).
+					ui.Textf(c, "%s · %s（%s）", model.MonthZh(detailMonth), regionName, model.EcoZoneLabel(zone)).
 						FontSize(11.5).FontWeight(500).TextColor(ui.RGB(255, 255, 255))
 				})
 			})
@@ -444,7 +428,7 @@ func (a *AppState) viewSeasonalDetailPage(c *ui.Context, t *ui.Theme, code strin
 						statusPill(c, phase.Label(), bg, fg)
 					})
 
-					ui.Text(c, bird.CardSeasonBlurb(phase, a.seasonalMonth, regionName)).
+					ui.Text(c, bird.CardSeasonBlurb(phase, detailMonth, regionName)).
 						FontSize(14).LineHeight(1.62).TextColor(secondaryTextColor(t))
 
 					// 追鸟备忘 + 定日历 双主操作
@@ -470,7 +454,7 @@ func (a *AppState) viewSeasonalDetailPage(c *ui.Context, t *ui.Theme, code strin
 							ui.Text(c, memoText).FontSize(13.5).FontWeight(500).TextColor(col)
 						})
 						if memoBtn.Clicked() {
-							a.toggleSeasonalBirdMemo(c, bird, zone, a.seasonalMonth, regionName)
+							a.toggleSeasonalBirdMemo(c, bird, zone, detailMonth, regionName)
 						}
 
 						calBtn := applySculptedSecondaryPillStyle(
@@ -484,7 +468,7 @@ func (a *AppState) viewSeasonalDetailPage(c *ui.Context, t *ui.Theme, code strin
 							ui.Text(c, "添加到日历").FontSize(13.5).FontWeight(500).TextColor(t.Text)
 						})
 						if calBtn.Clicked() {
-							a.AddSeasonalToCalendar(bird, zone, a.seasonalMonth, regionName)
+							a.AddSeasonalToCalendar(bird, zone, detailMonth, regionName)
 						}
 					})
 				})
@@ -508,14 +492,14 @@ func (a *AppState) viewSeasonalDetailPage(c *ui.Context, t *ui.Theme, code strin
 							cell := ui.Column(c.Key(fmt.Sprintf("sd-m-%d", mm))).Grow(1).Basis(0).Height(36).Radius(8).
 								Background(cellBg).AlignItems(ui.Center).Justify(ui.Center).
 								Role(ui.RoleButton).Label(fmt.Sprintf("%d月 %s", mm, ph.Label()))
-							if mm == a.seasonalMonth {
+							if mm == detailMonth {
 								cell.Border(2, t.Text)
 							}
 							cell.Children(func() {
 								ui.Textf(c, "%d", mm).FontSize(11.5).FontWeight(600).TextColor(cellFg).FontFeatures("tnum")
 							})
 							if cell.Clicked() {
-								a.seasonalMonth = mm
+								a.seasonalDetailMonth = mm
 								a.hapticSelection()
 							}
 						}
@@ -630,7 +614,7 @@ func (a *AppState) viewSeasonalMemoSheet(c *ui.Context, t *ui.Theme) {
 			})
 			minimalDivider(c, t)
 
-			ui.Scroll(c.Key("memo-sheet-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
+			ui.Scroll(c.Key("memo-sheet-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
 				ui.Column(c).FillWidth().Padding(12, 18, 30, 18).Gap(10).Children(func() {
 					if len(memos) == 0 {
 						tactileCard(c, t).Padding(28).Center().Gap(10).Children(func() {
@@ -646,60 +630,62 @@ func (a *AppState) viewSeasonalMemoSheet(c *ui.Context, t *ui.Theme) {
 
 					for i, item := range memos {
 						m := item
-						tactileCard(c, t).Key("memo-row-"+m.ID).Padding(13).Gap(8).Children(func() {
-							ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Start).Children(func() {
-								chkBg := softPillColor(t)
-								chkFg := t.TextMuted
-								if m.Completed {
-									chkBg = t.Success
-									chkFg = ui.RGB(255, 255, 255)
-								}
-								chk := ui.Box(c.Key(fmt.Sprintf("memo-chk-%d", i))).Size(24, 24).Radius(12).
-									Background(chkBg).Center().Shrink(0).
-									Role(ui.RoleButton).Label("切换备忘完成状态").Children(func() {
+						tactileCard(c, t).Key("memo-row-"+m.ID).Padding(14).Gap(10).Children(func() {
+							// 不显示头像占位圈，正文整体齐左排版
+							body := ui.Column(c.Key(fmt.Sprintf("memo-body-%d", i))).FillWidth().Gap(4).
+								Role(ui.RoleButton).Label("查看" + m.ComName + "时令详情")
+							body.Children(func() {
+								ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Baseline).Gap(8).Children(func() {
+									nameCol := t.Text
 									if m.Completed {
-										ui.Icon(c, iconCheck).FontSize(12).TextColor(chkFg)
+										nameCol = t.TextMuted
 									}
+									ui.Text(c, m.ComName).FontSize(15.5).FontWeight(600).TextColor(nameCol).SingleLine().Grow(1)
+									ui.Text(c, fallbackText(m.TargetDate, model.MonthZh(m.TargetMonth))).
+										FontSize(12).FontWeight(500).TextColor(opticalAccentColor(t)).FontFeatures("tnum").Shrink(0)
 								})
-								if chk.Clicked() {
-									_ = a.store.ToggleMemoDone(m.ID)
-									a.hapticSelection()
-								}
-
-								body := ui.Column(c.Key(fmt.Sprintf("memo-body-%d", i))).Grow(1).Basis(0).Gap(3).
-									Role(ui.RoleButton).Label("查看" + m.ComName + "时令详情")
-								body.Children(func() {
-									ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Baseline).Gap(6).Children(func() {
-										nameCol := t.Text
-										if m.Completed {
-											nameCol = t.TextMuted
-										}
-										ui.Text(c, m.ComName).FontSize(15).FontWeight(600).TextColor(nameCol).SingleLine().Grow(1)
-										ui.Text(c, fallbackText(m.TargetDate, fmt.Sprintf("%d月", m.TargetMonth))).
-											FontSize(12).FontWeight(500).TextColor(opticalAccentColor(t)).FontFeatures("tnum").Shrink(0)
-									})
-									ui.Text(c, fallbackText(m.Location, m.RegionName)).
-										FontSize(12).TextColor(t.TextMuted).MaxLines(2)
-									if strings.TrimSpace(m.Notes) != "" {
-										ui.Text(c, m.Notes).FontSize(12).TextColor(secondaryTextColor(t)).MaxLines(2)
-									}
-								})
-								if body.Clicked() {
-									a.seasonalMemoSheet = false
-									if m.TargetMonth >= 1 && m.TargetMonth <= 12 {
-										a.seasonalMonth = m.TargetMonth
-									}
-									a.router.Push("/seasonal/" + m.SpeciesCode)
+								ui.Text(c, fallbackText(m.Location, m.RegionName)).
+									FontSize(12).TextColor(t.TextMuted).MaxLines(2)
+								if strings.TrimSpace(m.Notes) != "" {
+									ui.Text(c, m.Notes).FontSize(12.5).LineHeight(1.45).TextColor(secondaryTextColor(t)).MaxLines(2)
 								}
 							})
+							if body.Clicked() {
+								a.seasonalMemoSheet = false
+								if m.TargetMonth >= 1 && m.TargetMonth <= 12 {
+									a.seasonalDetailMonth = m.TargetMonth
+								}
+								a.router.Push("/seasonal/" + m.SpeciesCode)
+							}
 
-							ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Padding(2, 0, 0, 34).Children(func() {
+							ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(8).Children(func() {
 								if m.PhaseLabel != "" {
-									ui.Textf(c, "%s · %d月计划", m.PhaseLabel, m.TargetMonth).FontSize(11.5).TextColor(t.TextMuted)
+									ui.Textf(c, "%s · %s计划", m.PhaseLabel, model.MonthZh(m.TargetMonth)).FontSize(11.5).TextColor(t.TextMuted)
 								} else {
 									ui.Box(c)
 								}
 								ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+									doneText := "标为已见"
+									if m.Completed {
+										doneText = "已见 ✓"
+									}
+									chkPill := applySculptedSecondaryPillStyle(
+										ui.Row(c.Key(fmt.Sprintf("memo-chk-%d", i))).Height(28).PaddingX(10).Radius(14).
+											AlignItems(ui.Center).Role(ui.RoleButton).Label(doneText),
+										t,
+									)
+									chkPill.Children(func() {
+										fg := t.TextMuted
+										if m.Completed {
+											fg = t.Success
+										}
+										ui.Text(c, doneText).FontSize(11.5).FontWeight(500).TextColor(fg)
+									})
+									if chkPill.Clicked() {
+										_ = a.store.ToggleMemoDone(m.ID)
+										a.hapticSelection()
+									}
+
 									calBtn := applySculptedSecondaryPillStyle(
 										ui.Row(c.Key(fmt.Sprintf("memo-cal-%d", i))).Height(28).PaddingX(10).Radius(14).
 											Gap(4).AlignItems(ui.Center).Role(ui.RoleButton).Label("定日历"),

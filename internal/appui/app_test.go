@@ -1126,7 +1126,7 @@ func TestSeasonalBirdingGuideCenteredTabDetailAndMemos(t *testing.T) {
 		t.Fatalf("expected 指南 dead-center in bottom dock (x≈201, y>740): rect=%+v mid=%.1f", sRect, seasonalMid)
 	}
 
-	// 2. 点击「指南」进入观鸟指南主页，校验四个分类（马上离开 / 当季 / 刚到 / 马上到）
+	// 2. 点击「指南」进入观鸟指南主页，校验十一月文字、无月份滚动选项、新slogan、无多余卡片角标及四个分类
 	if err := tt.Click("指南"); err != nil {
 		t.Fatal(err)
 	}
@@ -1134,10 +1134,35 @@ func TestSeasonalBirdingGuideCenteredTabDetailAndMemos(t *testing.T) {
 	if app.session.Tab != 2 || app.router.Path() != "/seasonal" {
 		t.Fatalf("expected /seasonal tab=2, got tab=%d path=%q", app.session.Tab, app.router.Path())
 	}
+	if !tt.HasText("十一月") || tt.HasText("11月·今") || tt.HasText("1月") {
+		t.Fatalf("expected clean chinese month text 十一月 without horizontal month pills, texts=%q", tt.Texts())
+	}
+	if tt.HasText("数量最稳") || !tt.HasText("当前正值最佳观赏期，最易与它邂逅") {
+		t.Fatalf("expected updated in-season slogan, texts=%q", tt.Texts())
+	}
 	for _, cat := range []string{"马上离开", "当季", "刚到", "马上到"} {
 		if !tt.HasText(cat) {
 			t.Fatalf("expected seasonal category %q visible, texts=%q", cat, tt.Texts())
 		}
+	}
+	// 卡片缩略图不再重复叠放「当季」角标（全页仅分段 tab 和顶部引导条出现 2 次）
+	inSeasonCount := 0
+	for _, s := range tt.Texts() {
+		if s == "当季" {
+			inSeasonCount++
+		}
+	}
+	if inSeasonCount > 3 {
+		t.Fatalf("expected no redundant 当季 overlay badges on bird thumbnails, count=%d texts=%q", inSeasonCount, tt.Texts())
+	}
+
+	// 校验全局主题已隐藏所有滚动条
+	var gotTheme *ui.Theme
+	ui.NewTester(func(c *ui.Context) {
+		gotTheme = applyAppTheme(c)
+	}, 402, 844)
+	if gotTheme == nil || gotTheme.Scrollbar != ui.Transparent || gotTheme.ScrollbarStyle.Thumb != ui.Transparent {
+		t.Fatalf("expected global transparent scrollbar, got %+v", gotTheme)
 	}
 
 	// 3. 点击当季任意鸟类卡片应进入 /seasonal/{code} 时令详情页（绝非直接跳图鉴），且包含羽色变化、月历与「进入鸟类图鉴」按钮
@@ -1178,12 +1203,20 @@ func TestSeasonalBirdingGuideCenteredTabDetailAndMemos(t *testing.T) {
 		t.Fatalf("expected jump to /guide/%s from seasonal detail, got %q", firstBird.SpeciesCode, app.router.Path())
 	}
 
-	// 返回时令详情 -> 返回观鸟指南 -> 底栏仍保持高亮在「指南」(Tab=2)
+	// 返回时令详情 -> 返回观鸟指南 -> 确认返回后仍停留十一月且底栏高亮「指南」(Tab=2) -> 打开追鸟备忘校验无头像占位与清晰操作
 	tt.MobileBack()
 	advanceUI(tt, 500*time.Millisecond)
 	tt.MobileBack()
 	advanceUI(tt, 500*time.Millisecond)
-	if app.router.Path() != "/seasonal" || app.session.Tab != 2 {
-		t.Fatalf("expected returned to /seasonal with tab=2, got path=%q tab=%d", app.router.Path(), app.session.Tab)
+	if app.router.Path() != "/seasonal" || app.session.Tab != 2 || app.seasonalMonth != 11 {
+		t.Fatalf("expected returned to /seasonal month=11 with tab=2, got path=%q tab=%d month=%d", app.router.Path(), app.session.Tab, app.seasonalMonth)
+	}
+
+	if err := tt.Click("打开追鸟备忘"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 500*time.Millisecond)
+	if !app.seasonalMemoSheet || !tt.HasText("标为已见") || !tt.HasText("定日历") {
+		t.Fatalf("expected memo sheet open with 标为已见 and 定日历 actions, open=%v texts=%q", app.seasonalMemoSheet, tt.Texts())
 	}
 }

@@ -199,11 +199,11 @@ type AppState struct {
 
 	// 观鸟指南（时令迁徙、追鸟备忘与日历提醒）
 	seasonalMonth       int
+	seasonalDetailMonth int
 	seasonalTab         int // 0=马上离开, 1=当季, 2=刚到, 3=马上到
 	seasonalRegionCode  string
 	seasonalRegionLabel string
 	seasonalScroll      ui.ScrollState
-	seasonalMonthScroll ui.ScrollState
 	seasonalMemoSheet   bool
 
 	// 自动排版图片分享预览浮层
@@ -273,10 +273,10 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client, sess *
 		hsObsBusy:           make(map[string]bool),
 		jDraftCount:         1,
 		seasonalMonth:       int(time.Now().Month()),
+		seasonalDetailMonth: int(time.Now().Month()),
 		seasonalTab:         1,
 		seasonalRegionCode:  cfg.DefaultRegion,
 		seasonalRegionLabel: regionLabelByCode(cfg.DefaultRegion),
-		seasonalMonthScroll: ui.ScrollState{X: float32(max(0, int(time.Now().Month())-3)) * 56},
 	}
 	a.router.Animation = &ui.Animation{Spring: ui.SpringOptions{
 		Duration:  340 * time.Millisecond,

@@ -61,7 +61,7 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 		})
 
 		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
-			ui.Scroll(c.Key("settings-scroll")).Fill().Children(func() {
+			ui.Scroll(c.Key("settings-scroll")).Fill().Scrollbars(false).Children(func() {
 				ui.Column(c).FillWidth().Padding(10, 18, dockClearancePad(c, 24), 18).Gap(14).Children(func() {
 					// 1. 数据接口与密钥（合并入口）
 					tactileCard(c, t).Clip().Children(func() {
@@ -163,7 +163,7 @@ func (a *AppState) viewSettingsKeySheet(c *ui.Context, t *ui.Theme) {
 			})
 			minimalDivider(c, t)
 
-			ui.Scroll(c.Key("sk-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
+			ui.Scroll(c.Key("sk-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
 				ui.Column(c).FillWidth().Padding(14, 18, 32, 18).Gap(14).Children(func() {
 					tactileCard(c, t).Padding(16).Gap(12).Children(func() {
 						ui.Column(c).FillWidth().Gap(8).Children(func() {
@@ -235,7 +235,7 @@ func (a *AppState) viewSettingsAboutSheet(c *ui.Context, t *ui.Theme) {
 			})
 			minimalDivider(c, t)
 
-			ui.Scroll(c.Key("ab-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
+			ui.Scroll(c.Key("ab-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
 				ui.Column(c).FillWidth().Padding(14, 18, 32, 18).Gap(14).Children(func() {
 					tactileCard(c, t).Padding(16).Gap(4).Children(func() {
 						ui.Text(c, "Birdview").FontSize(16).FontWeight(600)

@@ -53,6 +53,13 @@ func applyAppTheme(c *ui.Context) *ui.Theme {
 	t.Spacing = 6
 	t.FontSize = 15
 	t.Font = platformFontFamily()
+	t.Scrollbar = ui.Transparent
+	t.ScrollbarStyle = ui.ScrollbarStyle{
+		Track:  ui.Transparent,
+		Thumb:  ui.Transparent,
+		Hover:  ui.Transparent,
+		Active: ui.Transparent,
+	}
 
 	if c.Theme().Dark {
 		t.Background = ui.Hex("#0B0E16")

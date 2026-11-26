@@ -363,7 +363,7 @@ func (a *AppState) viewExploreHome(c *ui.Context, t *ui.Theme) {
 
 		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
 			scroll := ui.Scroll(c.Key(fmt.Sprintf("exp-scroll-%d", a.session.ExploreSubTab))).Fill().
-				TrackScroll(&a.exploreScroll[a.session.ExploreSubTab])
+				Scrollbars(false).TrackScroll(&a.exploreScroll[a.session.ExploreSubTab])
 			if scroll.PullToRefresh(&a.exploreRefresh) {
 				a.LoadExploreData()
 			}
@@ -656,7 +656,7 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 		sheetRim = ui.RGBA(255, 255, 255, 0.14)
 	}
 
-	ui.Scroll(c.Key("ep-scroll")).Fill().Children(func() {
+	ui.Scroll(c.Key("ep-scroll")).Fill().Scrollbars(false).Children(func() {
 		ui.Column(c).FillWidth().Padding(0, 0, 44, 0).Gap(0).Children(func() {
 			count := len(item.Photos)
 			heroH := float32(330) + top
@@ -823,7 +823,7 @@ func (a *AppState) viewExploreChecklistDetail(c *ui.Context, t *ui.Theme, subID 
 			}
 		})
 
-		ui.Scroll(c.Key("ec-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
+		ui.Scroll(c.Key("ec-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
 			ui.Column(c).FillWidth().Padding(6, 18, 44, 18).Gap(14).Children(func() {
 				tactileCard(c, t).Padding(16).Gap(6).Children(func() {
 					ui.Text(c, obs.ComName).FontSize(22).FontWeight(600).LetterSpacing(-0.1)
@@ -957,7 +957,7 @@ func (a *AppState) viewExploreHotspotDetail(c *ui.Context, t *ui.Theme, locID st
 			ui.Text(c, "观鸟热点").FontSize(16).FontWeight(600).SingleLine().Grow(1)
 		})
 
-		ui.Scroll(c.Key("es-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
+		ui.Scroll(c.Key("es-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
 			ui.Column(c).FillWidth().Padding(6, 18, 44, 18).Gap(14).Children(func() {
 				tactileCard(c, t).Padding(16).Gap(10).Children(func() {
 					ui.Text(c, spot.LocName).FontSize(22).FontWeight(600).LetterSpacing(-0.1)
@@ -1068,7 +1068,7 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 				minimalSearchBar(c, "rp-search", &a.regRegionQuery, "搜索省市或地区", "搜索地区", t)
 			})
 
-			ui.Scroll(c.Key("rp-list")).Grow(1).Basis(0).FillWidth().Padding(4, 18, 28, 18).Children(func() {
+			ui.Scroll(c.Key("rp-list")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Padding(4, 18, 28, 18).Children(func() {
 				q := strings.ToLower(strings.TrimSpace(a.regRegionQuery))
 				tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
 					for _, reg := range api.ChinaRegions {

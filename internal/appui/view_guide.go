@@ -532,7 +532,7 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 		a.guideList.Label = nil
 
 		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
-			list := ui.List(c.Key("guide-taxa-list"), &a.guideList, rowCount).Fill().TrackScroll(&a.guideScroll)
+			list := ui.List(c.Key("guide-taxa-list"), &a.guideList, rowCount).Fill().Scrollbars(false).TrackScroll(&a.guideScroll)
 			if list.PullToRefresh(&a.guideRefresh) {
 				a.loadTaxonomyAsync(true)
 			}
@@ -663,7 +663,7 @@ func (a *AppState) viewGuideScopeSheet(c *ui.Context, t *ui.Theme) {
 				minimalSearchBar(c, "gs-search", &a.regRegionQuery, "搜索省市名称或区号", "搜索地区", t)
 			})
 
-			ui.Scroll(c.Key("gs-list")).Grow(1).Basis(0).FillWidth().Padding(4, 18, 28, 18).Gap(14).Children(func() {
+			ui.Scroll(c.Key("gs-list")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Padding(4, 18, 28, 18).Gap(14).Children(func() {
 				q := strings.ToLower(strings.TrimSpace(a.regRegionQuery))
 				if q == "" {
 					tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
@@ -787,7 +787,7 @@ func (a *AppState) viewGuideFilterSheet(c *ui.Context, t *ui.Theme) {
 				}
 			}
 
-			ui.Scroll(c.Key("gf-scroll")).Grow(1).Basis(0).FillWidth().Padding(10, 18, 28, 18).Gap(14).Children(func() {
+			ui.Scroll(c.Key("gf-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Padding(10, 18, 28, 18).Gap(14).Children(func() {
 				if len(matchedOrders) == 0 && len(matchedFamilies) == 0 {
 					tactileCard(c, t).Padding(24).Center().Children(func() {
 						ui.Text(c, "未找到匹配的目或科").FontSize(14).TextColor(t.TextMuted)
@@ -870,7 +870,7 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 	topBtnY := max(float32(14), top+6)
 	optA, _ := opticalAccentColors(t)
 
-	ui.Scroll(c.Key("gd-scroll")).Fill().Children(func() {
+	ui.Scroll(c.Key("gd-scroll")).Fill().Scrollbars(false).Children(func() {
 		ui.Column(c).FillWidth().Padding(0, 0, 44, 0).Gap(0).Children(func() {
 			// 1. 全出血 Hero 摄影轮播区（顶部自研光学液态玻璃悬浮按钮 + 骨架扫光跳跃加载）
 			count := 0

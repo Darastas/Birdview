@@ -37,7 +37,7 @@ func (p SeasonalPhase) ShortActionHint() string {
 	case PhaseLeaving:
 		return "迁离窗口尾声，抓紧最后几天"
 	case PhaseInSeason:
-		return "当前最佳观赏期，数量最稳"
+		return "当前正值最佳观赏期，最易与它邂逅"
 	case PhaseJustArrived:
 		return "本月先头部队刚抵境，抢先打卡"
 	case PhaseArrivingSoon:
@@ -45,6 +45,18 @@ func (p SeasonalPhase) ShortActionHint() string {
 	default:
 		return "暂不在该地区活跃窗口"
 	}
+}
+
+// MonthZh 返回月份对应的中文文本（如 "十一月"）。
+func MonthZh(month int) string {
+	names := [...]string{
+		"", "一月", "二月", "三月", "四月", "五月", "六月",
+		"七月", "八月", "九月", "十月", "十一月", "十二月",
+	}
+	if month < 1 || month >= len(names) {
+		return ""
+	}
+	return names[month]
 }
 
 // EcoZone 将中国 34 个省级行政区按鸟类迁徙地理生态带划分为 7 大区域（外加全国汇总）。

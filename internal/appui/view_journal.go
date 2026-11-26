@@ -263,7 +263,7 @@ func (a *AppState) buildJournalTimeline(c *ui.Context, t *ui.Theme) {
 	}
 
 	ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
-		scroll := ui.Scroll(c.Key("j-timeline-scroll")).Fill().TrackScroll(&a.journalTimelineScroll)
+		scroll := ui.Scroll(c.Key("j-timeline-scroll")).Fill().Scrollbars(false).TrackScroll(&a.journalTimelineScroll)
 		if scroll.PullToRefresh(&a.journalRefresh) {
 			a.refreshJournalList()
 			a.journalRefresh.Refreshing = false
@@ -390,7 +390,7 @@ func (a *AppState) buildLifelistGrid(c *ui.Context, t *ui.Theme, unlocked []mode
 	}
 
 	ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
-		ui.Scroll(c.Key("ll-scroll")).Fill().TrackScroll(&a.journalLifelistScroll).Children(func() {
+		ui.Scroll(c.Key("ll-scroll")).Fill().Scrollbars(false).TrackScroll(&a.journalLifelistScroll).Children(func() {
 			ui.Column(c).FillWidth().Padding(10, 18, dockClearancePad(c, 22), 18).Gap(12).Children(func() {
 				if len(visible) == 0 {
 					tactileCard(c, t).Padding(34).Center().Gap(10).Children(func() {
@@ -535,7 +535,7 @@ func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID str
 			}
 		})
 
-		ui.Scroll(c.Key("jd-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
+		ui.Scroll(c.Key("jd-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
 			ui.Column(c).FillWidth().Padding(6, 18, 44, 18).Gap(14).Children(func() {
 				if len(entry.PhotoPaths) > 0 {
 					count := len(entry.PhotoPaths)
@@ -675,7 +675,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 			})
 			minimalDivider(c, t)
 
-			ui.Scroll(c.Key("j-sheet-scroll")).Grow(1).Basis(0).FillWidth().Children(func() {
+			ui.Scroll(c.Key("j-sheet-scroll")).Grow(1).Basis(0).FillWidth().Scrollbars(false).Children(func() {
 				ui.Column(c).FillWidth().Padding(10, 18, 28, 18).Gap(10).Children(func() {
 					// 1. 观测鸟种卡片
 					tactileCard(c, t).Padding(13).Gap(8).Children(func() {
@@ -763,7 +763,7 @@ func (a *AppState) viewJournalComposerSheet(c *ui.Context, t *ui.Theme) {
 							ui.Textf(c, "%d 张", len(a.jDraftPhotos)).FontSize(12).TextColor(t.TextMuted)
 						})
 
-						ui.ScrollHorizontal(c.Key("j-draft-photos-strip")).FillWidth().Gap(10).Children(func() {
+						ui.ScrollHorizontal(c.Key("j-draft-photos-strip")).FillWidth().Scrollbars(false).Gap(10).Children(func() {
 							addTile := tactileRecessedStyle(
 								ui.Column(c.Key("j-add-photo-tile")).Size(68, 68).Center().Gap(3).Shrink(0).
 									Role(ui.RoleButton).Label("添加照片"),
