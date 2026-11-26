@@ -222,7 +222,7 @@ func (a *AppState) viewJournalHome(c *ui.Context, t *ui.Theme) {
 			}
 		})
 
-		// 右下角立体浮雕圆形主按钮（避开底部 Liquid Glass 悬空导航栏）
+		// 右下角立体浮雕圆形主按钮（随底部悬浮导航栏以同一弹簧曲线平滑联动）
 		if !a.journalSheetOpen {
 			fabBottom := dockClearancePad(c, 12)
 			fab := applySculptedPrimaryStyle(
@@ -231,6 +231,12 @@ func (a *AppState) viewJournalHome(c *ui.Context, t *ui.Theme) {
 					Role(ui.RoleButton).Label("新建观鸟日志"),
 				t,
 			)
+			fabTarget := float32(0)
+			if a.dockHidden {
+				fabTarget = 66
+			}
+			fabShift := fab.AnimateTo("j-fab-dock-shift", fabTarget, dockToggleAnim)
+			fab.Translate(0, fabShift)
 			fab.Children(func() {
 				ui.Icon(c, iconPlus).FontSize(22).TextColor(t.AccentText)
 			})
@@ -517,6 +523,9 @@ func (a *AppState) viewJournalDetailPage(c *ui.Context, t *ui.Theme, entryID str
 				a.goBack()
 			}
 			ui.Text(c, entry.ComName).FontSize(16).FontWeight(600).SingleLine().Grow(1)
+			if tactileIconBtn(c, "jd-share-img", "图片分享", iconShare, 34, t).Clicked() {
+				a.ShareJournalEntryImageAsync(*entry)
+			}
 			if filterPill(c, "jd-edit", "编辑", false, t).Clicked() {
 				a.openEditJournalModal(*entry)
 			}
@@ -938,9 +947,13 @@ func (a *AppState) viewJournalPhotoActionSheet(c *ui.Context) {
 
 func (a *AppState) viewJournalExportActionSheet(c *ui.Context) {
 	mobile.ActionSheet(c, &a.exportSheetOpen, mobile.ActionSheetOptions{
-		Title:  "分享与备份",
+		Title:  "分享与导出",
 		Cancel: "取消",
 	},
+		mobile.Action{
+			Label: "生成精美分享长图",
+			OnTap: func() { a.ShareOrExportJournal("image") },
+		},
 		mobile.Action{
 			Label: "系统分享最近观察",
 			OnTap: func() { a.ShareOrExportJournal("share") },
@@ -948,10 +961,6 @@ func (a *AppState) viewJournalExportActionSheet(c *ui.Context) {
 		mobile.Action{
 			Label: "导出为 CSV 表格",
 			OnTap: func() { a.ShareOrExportJournal("csv") },
-		},
-		mobile.Action{
-			Label: "导出为 JSON 文件",
-			OnTap: func() { a.ShareOrExportJournal("json") },
 		},
 	)
 }

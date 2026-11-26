@@ -4,12 +4,22 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
 const keyboardInsetThreshold = 120
+
+// dockToggleAnim 是底部导航栏自动收起/展开以及联动悬浮控件的统一弹簧动画曲线。
+var dockToggleAnim = ui.Animation{
+	Spring: ui.SpringOptions{
+		Duration:  300 * time.Millisecond,
+		Bounce:    0,
+		Precision: 0.5,
+	},
+}
 
 var (
 	opticalBlueLight = ui.Hex("#2563EB")
@@ -374,11 +384,11 @@ func renderSegmentItems(c *ui.Context, strip ui.Element, key string, selected *i
 	return changed
 }
 
-// floatingGlassDock 绘制悬浮在内容之上的自研光学液态玻璃胶囊底部导航栏（含底部卷动边缘渐变）。
-func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme, obscured bool) bool {
+// floatingGlassDock 绘制悬浮在内容之上的 5 标签光学液态玻璃底部导航栏（指南居中，支持随滚动同曲线收起/展开）。
+func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme, obscured, hidden bool) (bool, float32) {
 	_, _, bottom, _ := c.SafeArea()
 	if bottom > keyboardInsetThreshold {
-		return false
+		return false, 1
 	}
 	type navDef struct {
 		label string
@@ -387,16 +397,29 @@ func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme, obscured bool)
 	items := []navDef{
 		{label: "图鉴", icon: iconNavGuide},
 		{label: "探索", icon: iconNavExplore},
+		{label: "指南", icon: iconNavSeasonal},
 		{label: "日志", icon: iconNavJournal},
 		{label: "设置", icon: iconNavSettings},
 	}
 
 	dockBottom := max(float32(10), bottom+4)
+	hideDist := float32(62) + dockBottom + 28
+	targetShift := float32(0)
+	if hidden {
+		targetShift = hideDist
+	}
+
 	changed := false
-	dock := ui.Row(c.Key("min-bottom-bar")).Absolute().Left(16).Right(16).Bottom(dockBottom).
-		Height(62).Padding(5, 6).Radius(31).
+	dock := ui.Row(c.Key("min-bottom-bar")).Absolute().Left(14).Right(14).Bottom(dockBottom).
+		Height(62).Padding(5, 5).Radius(31).
 		Role(ui.RoleTabList)
-	if obscured {
+	shift := dock.AnimateTo("dock-slide", targetShift, dockToggleAnim)
+	hideFrac := max(float32(0), min(float32(1), shift/max(hideDist, 1)))
+	dock.Translate(0, shift)
+	if hidden && shift > 24 {
+		dock.PassThrough()
+	}
+	if obscured || hideFrac > 0.05 {
 		if t.Dark {
 			dock.Background(ui.Hex("#161B26")).Border(1, ui.RGBA(255, 255, 255, 0.10))
 		} else {
@@ -436,8 +459,8 @@ func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme, obscured bool)
 				}
 			}
 			tab.Children(func() {
-				ui.Icon(c, it.icon).FontSize(20).TextColor(fg)
-				ui.Text(c, it.label).FontSize(11).FontWeight(weight).TextColor(fg).NoWrap()
+				ui.Icon(c, it.icon).FontSize(19).TextColor(fg)
+				ui.Text(c, it.label).FontSize(10.5).FontWeight(weight).TextColor(fg).NoWrap()
 			})
 			if tab.Clicked() && !active {
 				*selected = i
@@ -445,7 +468,15 @@ func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme, obscured bool)
 			}
 		}
 	})
-	return changed
+	return changed, hideFrac
+}
+
+// applyPhotoOverlayGlass 在静态展示时应用光学液态玻璃，路由滑动期间切换为轻量磨砂半透明以保证 120fps 零卡顿。
+func applyPhotoOverlayGlass(el ui.Element, transitioning, interactive bool) ui.Element {
+	if transitioning {
+		return el.Background(ui.RGBA(18, 24, 36, 0.56)).Border(1, ui.RGBA(255, 255, 255, 0.24))
+	}
+	return el.Material(photoOverlayGlass(interactive))
 }
 
 func circleIconBtn(c *ui.Context, key any, label string, svg *ui.SVG, bg, fg ui.Color, size float32) ui.Element {
@@ -470,8 +501,15 @@ func tactileIconBtn(c *ui.Context, key any, label string, svg *ui.SVG, size floa
 
 // liquidGlassCircleBtn 绘制覆盖于全出血照片上的自研光学液态玻璃圆形悬浮按钮。
 func liquidGlassCircleBtn(c *ui.Context, key any, label string, svg *ui.SVG, size float32) ui.Element {
-	return ui.Box(c.Key(key)).Size(size, size).Radius(size/2).
-		Material(photoOverlayGlass(true)).
+	return liquidGlassCircleBtnFast(c, key, label, svg, size, false)
+}
+
+// liquidGlassCircleBtnFast 支持在页面转场期间自动避开离屏模糊回读。
+func liquidGlassCircleBtnFast(c *ui.Context, key any, label string, svg *ui.SVG, size float32, transitioning bool) ui.Element {
+	return applyPhotoOverlayGlass(
+		ui.Box(c.Key(key)).Size(size, size).Radius(size/2),
+		transitioning, true,
+	).
 		Shadow(0, 4, 14, 0, ui.RGBA(0, 0, 0, 0.28)).
 		Center().Shrink(0).
 		Role(ui.RoleButton).Label(label).Children(func() {

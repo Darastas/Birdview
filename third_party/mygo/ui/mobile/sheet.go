@@ -1,8 +1,18 @@
 package mobile
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 )
+
+var sheetAnim = ui.Animation{
+	Spring: ui.SpringOptions{
+		Duration:  300 * time.Millisecond,
+		Bounce:    0,
+		Precision: 0.5,
+	},
+}
 
 // SheetOptions are how a Sheet rests.
 type SheetOptions struct {
@@ -79,8 +89,13 @@ func Sheet(c *ui.Context, open *bool, o SheetOptions, content func()) {
 	t := c.Theme()
 	_, _, bottom, _ := c.SafeArea()
 	ui.Overlay(c, func() {
-		back := ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Modal()
-		if !o.NoDismiss && (back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape)) {
+		back := ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0)
+		if *open {
+			back.Modal()
+		} else {
+			back.PassThrough()
+		}
+		if *open && !o.NoDismiss && (back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape)) {
 			*open = false
 		}
 		bg := t.Background
@@ -95,9 +110,11 @@ func Sheet(c *ui.Context, open *bool, o SheetOptions, content func()) {
 			// Clicks in it stay in it.
 			panel.Clicked()
 			panel.Draggable(&s.offset, ui.DraggableOptions{
-				Axis:   ui.Vertical,
-				Bounds: &ui.Rect{H: closedY},
-				Snap:   ui.Nearest(points...),
+				Axis:      ui.Vertical,
+				Bounds:    &ui.Rect{H: closedY},
+				Rigid:     true,
+				Snap:      ui.Nearest(points...),
+				Animation: sheetAnim,
 			})
 			panel.Children(func() {
 				if !o.NoGrabber {
@@ -110,7 +127,10 @@ func Sheet(c *ui.Context, open *bool, o SheetOptions, content func()) {
 		case born:
 			c.AnimationFrame() // shows below the window, to go up from there
 		case !*open:
-			s.offset = ui.Point{Y: closedY}
+			if s.offset.Y != closedY {
+				s.offset = ui.Point{Y: closedY}
+				c.AnimationFrame()
+			}
 			s.opened = false
 		case !s.opened:
 			s.opened, s.detent = true, 0
@@ -119,10 +139,14 @@ func Sheet(c *ui.Context, open *bool, o SheetOptions, content func()) {
 			*open = false // dragged away
 			s.opened = false
 		}
+		if s.offset.Y < 0 {
+			s.offset.Y = 0
+		}
 		shown := panel.DragOffset()
 		back.Background(scrim(c, 1-shown.Y/max(closedY, 1)))
 		if !*open && !born && shown.Y >= closedY-0.5 {
 			s.shown = false
+			c.AnimationFrame()
 		}
 	})
 }

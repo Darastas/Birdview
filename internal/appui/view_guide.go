@@ -218,11 +218,11 @@ func (a *AppState) SetTaxonomy(taxa []model.Taxon, chinaSet, regionSet map[strin
 	a.rebuildJournalSpeciesOptions()
 }
 
-// OpenSpeciesInGuide 跳转至图鉴页并推入指定物种的详情屏。
+// OpenSpeciesInGuide 跳转至图鉴页并推入指定物种的详情屏（不破坏当前 Tab 历史栈）。
 func (a *AppState) OpenSpeciesInGuide(speciesCode string) {
 	tx, ok := a.taxonByCode[speciesCode]
-	a.session.Tab = 0
 	if !ok {
+		a.session.Tab = 0
 		a.router.Replace("/guide")
 		a.invalidateUI()
 		return
@@ -436,9 +436,6 @@ func (a *AppState) viewGuideHome(c *ui.Context, t *ui.Theme) {
 				ui.Text(c, "图鉴").FontSize(26).FontWeight(600).LetterSpacing(-0.1).Role(ui.RoleHeading).Level(1)
 
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					if a.taxaLoading {
-						ui.Spinner(c).Label("更新名录中")
-					}
 					lbl := "目科"
 					fg := t.Text
 					if hasFilter {
@@ -926,13 +923,16 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 					})
 				}
 
-				if liquidGlassCircleBtn(c, "gd-back", "返回", iconBack, 38).
+				transitioning := a.router.Transitioning()
+				if liquidGlassCircleBtnFast(c, "gd-back", "返回", iconBack, 38, transitioning).
 					Absolute().Left(16).Top(topBtnY).Clicked() {
 					a.goBack()
 				}
 
-				logBtn := ui.Row(c.Key("gd-top-log")).Height(36).PaddingX(14).Radius(18).
-					Material(photoOverlayGlass(true)).
+				logBtn := applyPhotoOverlayGlass(
+					ui.Row(c.Key("gd-top-log")).Height(36).PaddingX(14).Radius(18),
+					transitioning, true,
+				).
 					Shadow(0, 4, 14, 0, ui.RGBA(0, 0, 0, 0.28)).
 					Gap(5).AlignItems(ui.Center).
 					Absolute().Right(16).Top(topBtnY).
@@ -947,11 +947,13 @@ func (a *AppState) viewGuideDetailPage(c *ui.Context, t *ui.Theme, code string) 
 
 				if count > 0 {
 					idx := max(0, min(a.guideGallery.Page, count-1))
-					ui.Textf(c, "%d / %d", idx+1, count).
-						Absolute().Left(18).Bottom(38).Padding(4, 10).Radius(999).
-						Material(photoOverlayGlass(false)).
-						FontSize(12).FontWeight(500).FontFeatures("tnum").
-						TextColor(ui.RGB(255, 255, 255))
+					applyPhotoOverlayGlass(
+						ui.Textf(c, "%d / %d", idx+1, count).
+							Absolute().Left(18).Bottom(38).Padding(4, 10).Radius(999).
+							FontSize(12).FontWeight(500).FontFeatures("tnum").
+							TextColor(ui.RGB(255, 255, 255)),
+						transitioning, false,
+					)
 					if count > 1 {
 						ui.Box(c).Absolute().Right(16).Bottom(40).Children(func() {
 							mobile.PageDots(c, idx, count)

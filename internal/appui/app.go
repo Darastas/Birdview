@@ -22,7 +22,16 @@ import (
 
 const maxMemLocalImages = 24
 
-var tabRoutes = []string{"/guide", "/explore", "/journal", "/settings"}
+var tabRoutes = []string{"/guide", "/explore", "/seasonal", "/journal", "/settings"}
+
+func tabIndexForPath(p string) (int, bool) {
+	for i, r := range tabRoutes {
+		if p == r {
+			return i, true
+		}
+	}
+	return 0, false
+}
 
 // MobileSession 保存轻量移动端页面切换状态，供 mygo.KeepState 热恢复。
 type MobileSession struct {
@@ -180,12 +189,36 @@ type AppState struct {
 	cacheStatsFiles   int
 	localDataBytes    int64
 	lastBarStyle      mygo.BarStyle
+
+	// 底部悬浮导航栏随滚动自动收起/展开状态
+	dockHidden      bool
+	dockHideFrac    float32
+	dockScrollKey   string
+	dockScrollLastY float32
+	dockScrollAccum float32
+
+	// 观鸟指南（时令迁徙、追鸟备忘与日历提醒）
+	seasonalMonth       int
+	seasonalTab         int // 0=马上离开, 1=当季, 2=刚到, 3=马上到
+	seasonalRegionCode  string
+	seasonalRegionLabel string
+	seasonalScroll      ui.ScrollState
+	seasonalMonthScroll ui.ScrollState
+	seasonalMemoSheet   bool
+
+	// 自动排版图片分享预览浮层
+	sharePreviewOpen  bool
+	sharePreviewTitle string
+	sharePreviewText  string
+	sharePreviewPath  string
+	sharePreviewSrc   ui.ImageSource
 }
 
 func (a *AppState) hasModalOpen() bool {
 	return a.guideFilterSheet || a.guideScopeSheet || a.regRegionSheetOpen ||
 		a.journalSheetOpen || a.journalPhotoSheet || a.exportSheetOpen ||
-		a.jDeleteConfirm || a.zoomOpen || a.setKeySheetOpen || a.setAboutSheetOpen
+		a.jDeleteConfirm || a.zoomOpen || a.setKeySheetOpen || a.setAboutSheetOpen ||
+		a.seasonalMemoSheet || a.sharePreviewOpen
 }
 
 // NewAppState 初始化移动端应用状态。
@@ -235,15 +268,20 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client, sess *
 		regRegionTarget:  "explore",
 		regChecklistMap:  make(map[string]*model.ChecklistDetail),
 		regChecklistBusy: make(map[string]bool),
-		hsRegionLabel:    regionLabelByCode(cfg.DefaultRegion),
-		hsObsMap:         make(map[string][]model.Observation),
-		hsObsBusy:        make(map[string]bool),
-		jDraftCount:      1,
+		hsRegionLabel:       regionLabelByCode(cfg.DefaultRegion),
+		hsObsMap:            make(map[string][]model.Observation),
+		hsObsBusy:           make(map[string]bool),
+		jDraftCount:         1,
+		seasonalMonth:       int(time.Now().Month()),
+		seasonalTab:         1,
+		seasonalRegionCode:  cfg.DefaultRegion,
+		seasonalRegionLabel: regionLabelByCode(cfg.DefaultRegion),
+		seasonalMonthScroll: ui.ScrollState{X: float32(max(0, int(time.Now().Month())-3)) * 56},
 	}
 	a.router.Animation = &ui.Animation{Spring: ui.SpringOptions{
-		Duration:  300 * time.Millisecond,
+		Duration:  340 * time.Millisecond,
 		Bounce:    0,
-		Precision: 0.5,
+		Precision: 0.002,
 	}}
 	a.syncSettingsDraft()
 	a.refreshJournalList()
@@ -305,6 +343,9 @@ func (a *AppState) SelectTab(idx int) {
 		return
 	}
 	a.session.Tab = idx
+	a.dockHidden = false
+	a.dockScrollKey = ""
+	a.dockScrollAccum = 0
 	a.router.Replace(tabRoutes[idx])
 	a.hapticSelection()
 	a.onTabActivated(idx)
@@ -319,8 +360,84 @@ func (a *AppState) onTabActivated(idx int) {
 				a.LoadExploreData()
 			}
 		}
-	case 3: // 设置
+	case 4: // 设置
 		a.refreshStorageStats()
+	}
+}
+
+func (a *AppState) syncDockAutoHide(curPath string, rootView, modalOpen bool) {
+	if !rootView || modalOpen {
+		a.dockHidden = false
+		a.dockScrollKey = ""
+		a.dockScrollAccum = 0
+		return
+	}
+	var curKey string
+	var curY float32
+	switch curPath {
+	case "/guide":
+		curKey = "guide"
+		curY = a.guideScroll.Y
+	case "/explore":
+		sub := a.session.ExploreSubTab
+		if sub < 0 || sub >= len(a.exploreScroll) {
+			sub = 0
+		}
+		curKey = fmt.Sprintf("explore-%d", sub)
+		curY = a.exploreScroll[sub].Y
+	case "/seasonal":
+		curKey = fmt.Sprintf("seasonal-%d-%d", a.seasonalMonth, a.seasonalTab)
+		curY = a.seasonalScroll.Y
+	case "/journal":
+		curKey = fmt.Sprintf("journal-%d", a.session.JournalSubTab)
+		if a.session.JournalSubTab == 0 {
+			curY = a.journalTimelineScroll.Y
+		} else {
+			curY = a.journalLifelistScroll.Y
+		}
+	default:
+		// 设置页或未知页常驻显示底栏
+		a.dockHidden = false
+		a.dockScrollKey = ""
+		a.dockScrollAccum = 0
+		return
+	}
+
+	if curKey != a.dockScrollKey {
+		a.dockScrollKey = curKey
+		a.dockScrollLastY = curY
+		a.dockScrollAccum = 0
+		if curY <= 16 {
+			a.dockHidden = false
+		}
+		return
+	}
+
+	dy := curY - a.dockScrollLastY
+	a.dockScrollLastY = curY
+	if curY <= 16 {
+		a.dockHidden = false
+		a.dockScrollAccum = 0
+		return
+	}
+	if dy > 0.5 {
+		if a.dockScrollAccum < 0 {
+			a.dockScrollAccum = 0
+		}
+		a.dockScrollAccum += dy
+		if !a.dockHidden && a.dockScrollAccum >= 22 && curY > 48 {
+			a.dockHidden = true
+			a.dockScrollAccum = 0
+		}
+	} else if dy < -0.5 {
+		if a.dockScrollAccum > 0 {
+			a.dockScrollAccum = 0
+		}
+		a.dockScrollAccum += dy
+		if a.dockHidden && a.dockScrollAccum <= -14 {
+			a.dockHidden = false
+			a.dockScrollAccum = 0
+		}
 	}
 }
 
@@ -354,7 +471,10 @@ func (a *AppState) View(c *ui.Context) {
 
 	wantBarStyle := mygo.BarStyleDark
 	curPath := a.router.Path()
-	if a.zoomOpen || t.Dark || (!modalOpen && (strings.HasPrefix(curPath, "/guide/") || strings.HasPrefix(curPath, "/explore/photo/"))) {
+	if idx, ok := tabIndexForPath(curPath); ok {
+		a.session.Tab = idx
+	}
+	if a.zoomOpen || a.sharePreviewOpen || t.Dark || (!modalOpen && (strings.HasPrefix(curPath, "/guide/") || strings.HasPrefix(curPath, "/explore/photo/") || strings.HasPrefix(curPath, "/seasonal/"))) {
 		wantBarStyle = mygo.BarStyleLight
 	}
 	if wantBarStyle != a.lastBarStyle {
@@ -368,6 +488,7 @@ func (a *AppState) View(c *ui.Context) {
 	}
 
 	rootView := a.isRootRoute()
+	a.syncDockAutoHide(curPath, rootView, modalOpen)
 
 	ui.Box(c).Fill().Background(t.Background).Children(func() {
 		applyCanvasBackground(ui.Box(c).Fill(), t).Children(func() {
@@ -392,6 +513,12 @@ func (a *AppState) View(c *ui.Context) {
 					case r.Match("/explore/spot/{id}"):
 						r.Title("观鸟热点")
 						a.viewExploreHotspotDetail(c, t, r.Param("id"))
+					case r.Match("/seasonal"):
+						r.Title("观鸟指南")
+						a.viewSeasonalHome(c, t)
+					case r.Match("/seasonal/{code}"):
+						r.Title("时令详情")
+						a.viewSeasonalDetailPage(c, t, r.Param("code"))
 					case r.Match("/journal"):
 						r.Title("日志")
 						a.viewJournalHome(c, t)
@@ -410,8 +537,12 @@ func (a *AppState) View(c *ui.Context) {
 
 			a.buildMiniAudioBar(c, t, rootView, modalOpen)
 
-			if rootView && floatingGlassDock(c, &a.session.Tab, t, modalOpen) {
-				a.SelectTab(a.session.Tab)
+			if rootView {
+				dockChanged, hideFrac := floatingGlassDock(c, &a.session.Tab, t, modalOpen, a.dockHidden)
+				a.dockHideFrac = hideFrac
+				if dockChanged {
+					a.SelectTab(a.session.Tab)
+				}
 			}
 		})
 	})
@@ -419,12 +550,14 @@ func (a *AppState) View(c *ui.Context) {
 	a.viewRegionPickerSheet(c, t)
 	a.viewGuideScopeSheet(c, t)
 	a.viewGuideFilterSheet(c, t)
+	a.viewSeasonalMemoSheet(c, t)
 	a.viewJournalComposerSheet(c, t)
 	a.viewJournalPhotoActionSheet(c)
 	a.viewJournalExportActionSheet(c)
 	a.viewJournalDeleteDialog(c)
 	a.viewSettingsKeySheet(c, t)
 	a.viewSettingsAboutSheet(c, t)
+	a.viewShareImagePreviewOverlay(c, t)
 	a.viewPhotoZoomOverlay(c, t)
 }
 
@@ -444,6 +577,14 @@ func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme, aboveDock, obsc
 
 	card := ui.Column(c.Key("mini-audio-bar")).Absolute().Left(16).Right(16).Bottom(barBottom).
 		Radius(28).Clip()
+	if aboveDock && bottom <= keyboardInsetThreshold {
+		miniTarget := float32(0)
+		if a.dockHidden {
+			miniTarget = 66
+		}
+		miniShift := card.AnimateTo("mini-dock-shift", miniTarget, dockToggleAnim)
+		card.Translate(0, miniShift)
+	}
 	if obscured {
 		if t.Dark {
 			card.Background(ui.Hex("#161B26")).Border(1, ui.RGBA(255, 255, 255, 0.10))
@@ -734,6 +875,13 @@ func (a *AppState) fillGPSLocationAsync(target string) {
 		fix, err := location.Current(ctx)
 		cancel()
 
+		var cityName string
+		if err == nil {
+			geoCtx, geoCancel := context.WithTimeout(context.Background(), 4*time.Second)
+			cityName = a.client.ReverseGeocodeCity(geoCtx, fix.Latitude, fix.Longitude)
+			geoCancel()
+		}
+
 		a.updateUI(func() {
 			if target == "explore" {
 				a.regGPSBusy = false
@@ -746,9 +894,16 @@ func (a *AppState) fillGPSLocationAsync(target string) {
 					return
 				}
 				a.regCustomCode = fmt.Sprintf("%.4f,%.4f", fix.Latitude, fix.Longitude)
-				a.regRegionLabel = fmt.Sprintf("定位附近 (%.2f, %.2f)", fix.Latitude, fix.Longitude)
+				if cityName != "" {
+					a.regRegionLabel = cityName
+				} else {
+					a.regRegionLabel = "当前位置附近"
+				}
 				a.regRegionSheetOpen = false
 				a.resetExploreForRegionChange()
+				if cityName != "" {
+					a.pendingToast = "已定位至 " + cityName
+				}
 			} else {
 				a.jDraftGPSBusy = false
 				if err != nil {
@@ -761,18 +916,26 @@ func (a *AppState) fillGPSLocationAsync(target string) {
 				}
 				a.jDraftLat = fix.Latitude
 				a.jDraftLng = fix.Longitude
-				if strings.TrimSpace(a.jDraftLocation) == "" {
-					a.jDraftLocation = fmt.Sprintf("%.4f, %.4f", fix.Latitude, fix.Longitude)
+				displayLoc := cityName
+				if displayLoc == "" {
+					displayLoc = fmt.Sprintf("当前位置 (%.2f, %.2f)", fix.Latitude, fix.Longitude)
+				}
+				if strings.TrimSpace(a.jDraftLocation) == "" || strings.Contains(a.jDraftLocation, ",") {
+					a.jDraftLocation = displayLoc
 				}
 				a.hapticSuccess()
-				a.pendingToast = "已填充当前坐标"
+				a.pendingToast = "已定位：" + displayLoc
 			}
 		})
 	}()
 }
 
-// ShareOrExportJournal 优先支持移动端系统分享，导出 CSV/JSON 时兼容 Android 文档保存与桌面保存对话框。
+// ShareOrExportJournal 支持自动排版图片分享、移动端系统分享及 CSV 表格导出。
 func (a *AppState) ShareOrExportJournal(mode string) {
+	if mode == "image" {
+		a.ShareJournalSummaryImageAsync()
+		return
+	}
 	if mode == "share" {
 		entries := a.store.Entries()
 		unlocked := a.store.UnlockedBirds()
@@ -801,21 +964,17 @@ func (a *AppState) ShareOrExportJournal(mode string) {
 		return
 	}
 
-	defaultName := "birdview_journal." + mode
+	defaultName := "birdview_journal.csv"
 	go func() {
 		dest, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
 			Parent:      a.win,
-			Title:       "导出观鸟日志",
+			Title:       "导出观鸟日志 (CSV)",
 			DefaultPath: defaultName,
 		})
 		if err != nil || dest == "" {
 			return
 		}
-		if mode == "csv" {
-			err = a.store.ExportJournalCSV(dest)
-		} else {
-			err = a.store.ExportJournalJSON(dest)
-		}
+		err = a.store.ExportJournalCSV(dest)
 		a.updateUI(func() {
 			if err != nil {
 				a.pendingToast = fmt.Sprintf("导出失败: %v", err)
@@ -863,8 +1022,12 @@ func regionShortNameByCode(code string) string {
 }
 
 func regionCodeByLabel(label string) string {
+	clean := strings.TrimSpace(label)
+	if idx := strings.Index(clean, " ("); idx > 0 {
+		clean = strings.TrimSpace(clean[:idx])
+	}
 	for _, r := range api.ChinaRegions {
-		if r.Name == label {
+		if r.Name == clean || strings.EqualFold(r.Code, clean) {
 			return r.Code
 		}
 	}

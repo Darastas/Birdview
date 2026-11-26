@@ -547,7 +547,20 @@ object HostImpl : HostCalls {
     override fun openURL(c: OpenURLCall): OpenURLReply {
         val r = OpenURLReply()
         try {
-            val i = Intent(Intent.ACTION_VIEW, Uri.parse(c.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val uri = Uri.parse(c.url)
+            if (uri.scheme == "birdview-calendar" && uri.host == "add") {
+                val i = Intent(Intent.ACTION_INSERT).setData(android.provider.CalendarContract.Events.CONTENT_URI)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                uri.getQueryParameter("title")?.let { i.putExtra(android.provider.CalendarContract.Events.TITLE, it) }
+                uri.getQueryParameter("location")?.let { i.putExtra(android.provider.CalendarContract.Events.EVENT_LOCATION, it) }
+                uri.getQueryParameter("desc")?.let { i.putExtra(android.provider.CalendarContract.Events.DESCRIPTION, it) }
+                uri.getQueryParameter("begin")?.toLongOrNull()?.let { i.putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, it) }
+                uri.getQueryParameter("end")?.toLongOrNull()?.let { i.putExtra(android.provider.CalendarContract.EXTRA_EVENT_END_TIME, it) }
+                (activity ?: app).startActivity(i)
+                r.ok = true
+                return r
+            }
+            val i = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             (activity ?: app).startActivity(i)
             r.ok = true
         } catch (e: Exception) {

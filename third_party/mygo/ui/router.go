@@ -334,6 +334,11 @@ var browserHistory interface {
 func (r *Router) CanGoBack() bool    { return r.at > 0 }
 func (r *Router) CanGoForward() bool { return r.at < len(r.entries)-1 }
 
+// Transitioning reports whether the router is currently sliding or peeking between pages.
+func (r *Router) Transitioning() bool {
+	return r.view.leaving != nil || r.swiping || r.settling
+}
+
 // Path returns the path of the page shown, as "/notes/42", without its
 // query.
 func (r *Router) Path() string { return pathOf(r.current().loc) }
@@ -600,6 +605,34 @@ func (r *Router) build(c *context, box *node, v *routeView, parent *Route, fn fu
 	}
 	box.Children(func() {
 		var page *node
+		w := float32(0)
+		if box.st != nil {
+			w = box.st.w
+		}
+		if w <= 0 {
+			w, _, _ = c.rt.host.size()
+		}
+		sign := float32(1)
+		if c.rt.layoutDir() {
+			sign = -1
+		}
+		drawEdgeShadow := func(p *Painter, rc Rect) {
+			if rc.W <= 0 || rc.H <= 0 {
+				return
+			}
+			const sw = float32(14)
+			edge := Rect{X: rc.X - sw, Y: rc.Y, W: sw, H: rc.H}
+			angle := float32(90)
+			if sign < 0 {
+				edge = Rect{X: rc.X + rc.W, Y: rc.Y, W: sw, H: rc.H}
+				angle = 270
+			}
+			p.FillGradient(edge, LinearGradient{
+				From:  RGBA(0, 0, 0, 0),
+				To:    RGBA(0, 0, 0, 0.14),
+				Angle: angle,
+			}, 0)
+		}
 		switch {
 		case v.leaving == nil && parent == nil && r.peeking(c) && r.at > 0:
 			// A gesture takes the page back: the one before shows under it.
@@ -608,9 +641,16 @@ func (r *Router) build(c *context, box *node, v *routeView, parent *Route, fn fu
 			at := r.swipe
 			lower := r.page(c, parent, r.entries[r.at-1], fn, true)
 			page = r.page(c, parent, cur, fn, false)
-			page.Absolute().Top(0).Fill().Background(bg).StartPercent(100*at).Shadow(0, 0, 16, 0, RGBA(0, 0, 0, 0.15))
-			lower.StartPercent(-30 * (1 - at)).Background(bg).DrawOver(func(p *Painter, rc Rect) {
-				p.Fill(rc, RGBA(0, 0, 0, 0.06*(1-at)), 0)
+			page.Absolute().Top(0).Fill().Background(bg).DrawOver(drawEdgeShadow)
+			if w > 0 {
+				page.Translate(sign*w*at, 0)
+				lower.Translate(-sign*w*0.26*(1-at), 0)
+			} else {
+				page.StartPercent(100 * at)
+				lower.StartPercent(-26 * (1 - at))
+			}
+			lower.Background(bg).DrawOver(func(p *Painter, rc Rect) {
+				p.Fill(rc, RGBA(0, 0, 0, 0.08*(1-at)), 0)
 			})
 		case v.leaving == nil:
 			page = r.page(c, parent, cur, fn, false)
@@ -635,10 +675,16 @@ func (r *Router) build(c *context, box *node, v *routeView, parent *Route, fn fu
 			if v.dir > 0 {
 				upper, lower, shown = page, old, progress
 			}
-			// From the end: the left right to left.
-			upper.Absolute().Top(0).Fill().Background(bg).StartPercent(100*(1-shown)).Shadow(0, 0, 16, 0, RGBA(0, 0, 0, 0.15))
-			lower.StartPercent(-30 * shown).Background(bg).DrawOver(func(p *Painter, rc Rect) {
-				p.Fill(rc, RGBA(0, 0, 0, 0.06*shown), 0)
+			upper.Absolute().Top(0).Fill().Background(bg).DrawOver(drawEdgeShadow)
+			if w > 0 {
+				upper.Translate(sign*w*(1-shown), 0)
+				lower.Translate(-sign*w*0.26*shown, 0)
+			} else {
+				upper.StartPercent(100 * (1 - shown))
+				lower.StartPercent(-26 * shown)
+			}
+			lower.Background(bg).DrawOver(func(p *Painter, rc Rect) {
+				p.Fill(rc, RGBA(0, 0, 0, 0.08*shown), 0)
 			})
 		}
 		r.keep(c, box, v, level, cur)

@@ -116,15 +116,15 @@ func TestMobileGuideSearchRouteAndSettings(t *testing.T) {
 		t.Fatalf("expected route back to /guide, got %q", app.router.Path())
 	}
 
-	// 切换到底部「设置」Tab -> 打开 API 密钥抽屉 -> 保存 Key
+	// 切换到底部「设置」Tab -> 打开统一「数据源密钥」抽屉 -> 保存 Key
 	if err := tt.Click("设置"); err != nil {
 		t.Fatal(err)
 	}
 	advanceUI(tt, 300*time.Millisecond)
-	if app.session.Tab != 3 || app.router.Path() != "/settings" {
-		t.Fatalf("expected settings tab/route, tab=%d path=%q", app.session.Tab, app.router.Path())
+	if app.session.Tab != 4 || app.router.Path() != "/settings" {
+		t.Fatalf("expected settings tab=4 and /settings route, tab=%d path=%q", app.session.Tab, app.router.Path())
 	}
-	if err := tt.Click("eBird API Key"); err != nil {
+	if err := tt.Click("数据源密钥"); err != nil {
 		t.Fatal(err)
 	}
 	advanceUI(tt, 700*time.Millisecond)
@@ -338,8 +338,11 @@ func TestCrystalGlassAndSkeletonRender(t *testing.T) {
 			t.Fatalf("expected removed settings section heading %q to be absent, texts=%q", removedHeading, tt.Texts())
 		}
 	}
-	if !tt.HasText("eBird API Key") || !tt.HasText("外观主题") || !tt.HasText("关于 Birdview") {
+	if !tt.HasText("数据源密钥") || !tt.HasText("外观主题") || !tt.HasText("关于 Birdview") {
 		t.Fatalf("expected clean settings rows intact, texts=%q", tt.Texts())
+	}
+	if tt.HasText("Xeno-canto Key") {
+		t.Fatalf("expected merged single API key entry without separate Xeno-canto row, texts=%q", tt.Texts())
 	}
 	if img := tt.Image(); img.Bounds().Dy() != 844 {
 		t.Fatalf("unexpected settings render bounds: %v", img.Bounds())
@@ -563,7 +566,7 @@ func TestExploreImmediateSkeletonAndConditionalScrim(t *testing.T) {
 
 	// 1. 切换地区应立即清空旧数据并进入灰色骨架卡片加载，顶部不出现转圈动画
 	app.regCustomCode = ""
-	app.regRegionLabel = "四川 (CN-51)"
+	app.regRegionLabel = "四川"
 	app.resetExploreForRegionChange()
 	advanceUI(tt, 32*time.Millisecond)
 
@@ -911,5 +914,276 @@ func TestAndroidBackClosesLightboxOnlyNotDetailRoute(t *testing.T) {
 	advanceUI(tt, 600*time.Millisecond)
 	if app.router.Path() != "/guide" {
 		t.Fatalf("expected /guide after second MobileBack, got %q", app.router.Path())
+	}
+}
+
+func TestExploreBackPreservesExploreTab(t *testing.T) {
+	app := newTestAppState(t)
+	app.regObsList = []model.Observation{
+		{
+			SpeciesCode: "hoopoe",
+			ComName:     "戴胜",
+			SciName:     "Upupa epops",
+			LocName:     "奥林匹克森林公园",
+			ObsDt:       "2026-11-25 08:30",
+			HowMany:     1,
+			SubID:       "S12345",
+		},
+	}
+	tt := ui.NewTester(app.View, 402, 844)
+	tt.SetInsets(44, 0, 24, 0)
+
+	// 进入探索 -> 近期目击 -> 清单详情 -> 跳图鉴详情 -> 连续两次返回
+	if err := tt.Click("探索"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 120*time.Millisecond)
+	if app.session.Tab != 1 || app.router.Path() != "/explore" {
+		t.Fatalf("expected explore tab=1, got tab=%d path=%q", app.session.Tab, app.router.Path())
+	}
+	if err := tt.Click("近期目击"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("戴胜"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 500*time.Millisecond)
+	if app.router.Path() != "/explore/check/S12345" {
+		t.Fatalf("expected checklist detail route, got %q", app.router.Path())
+	}
+	// 从探索子页点击「看图鉴」后再依次返回，底栏必须保持高亮在「探索」(Tab=1)
+	if err := tt.Click("看图鉴"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 500*time.Millisecond)
+	if app.router.Path() != "/guide/hoopoe" {
+		t.Fatalf("expected pushed guide detail /guide/hoopoe, got %q", app.router.Path())
+	}
+	tt.MobileBack()
+	advanceUI(tt, 500*time.Millisecond)
+	if app.router.Path() != "/explore/check/S12345" {
+		t.Fatalf("expected back to checklist detail, got %q", app.router.Path())
+	}
+	tt.MobileBack()
+	advanceUI(tt, 500*time.Millisecond)
+	if app.router.Path() != "/explore" || app.session.Tab != 1 {
+		t.Fatalf("expected back on /explore with bottom tab preserved at 1 (探索), got path=%q tab=%d", app.router.Path(), app.session.Tab)
+	}
+}
+
+func TestDockAutoHideSettingsInlineThemeAndNoGuideSpinner(t *testing.T) {
+	app := newTestAppState(t)
+	// 生成足够多的鸟种确保可滚动
+	taxa := make([]model.Taxon, 24)
+	china := make(map[string]bool, 24)
+	for i := range taxa {
+		code := string([]byte{'b', 'd', byte('a' + i/26), byte('a' + i%26)})
+		taxa[i] = model.Taxon{SpeciesCode: code, ComName: "鸟" + code, SciName: "Avis " + code, Order: "Passeriformes", FamilySciName: "Paridae"}
+		china[code] = true
+	}
+	app.SetTaxonomy(taxa, china, nil, "CN-11")
+	app.taxaLoading = true // 模拟图鉴下拉刷新期间
+
+	tt := ui.NewTester(app.View, 402, 844)
+	tt.SetInsets(44, 0, 24, 0)
+	advanceUI(tt, 64*time.Millisecond)
+
+	// 1. 图鉴目科左侧不再显示重复的转圈加载动画
+	if tt.HasText("更新名录中") {
+		t.Fatalf("expected duplicate guide header spinner removed, texts=%q", tt.Texts())
+	}
+
+	// 2. 下滑列表时底栏自动收起，上滑时自动恢复显示
+	touchSwipe(tt, 200, 640, 200, 240, 8)
+	advanceUI(tt, 200*time.Millisecond)
+	if !app.dockHidden {
+		t.Fatalf("expected bottom dock hidden after downward scroll, scrollY=%.1f", app.guideScroll.Y)
+	}
+	touchSwipe(tt, 200, 260, 200, 620, 8)
+	advanceUI(tt, 200*time.Millisecond)
+	if app.dockHidden {
+		t.Fatalf("expected bottom dock shown again after upward scroll, scrollY=%.1f", app.guideScroll.Y)
+	}
+
+	// 3. 设置页：外观主题与 3 个紧凑选项处于同一水平行，且只有单一「数据源密钥」入口
+	if err := tt.Click("设置"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 120*time.Millisecond)
+	themeLbl, ok1 := tt.Find("外观主题")
+	autoBtn, ok2 := tt.Find("自动")
+	darkBtn, ok3 := tt.Find("深色")
+	if !ok1 || !ok2 || !ok3 {
+		t.Fatalf("expected inline theme label and options, ok=%v/%v/%v texts=%q", ok1, ok2, ok3, tt.Texts())
+	}
+	if autoBtn.X <= themeLbl.X || darkBtn.X <= autoBtn.X {
+		t.Fatalf("expected 自动/深色 placed to the right of 外观主题: lbl=%+v auto=%+v dark=%+v", themeLbl, autoBtn, darkBtn)
+	}
+	dy := autoBtn.Y - themeLbl.Y
+	if dy < -14 || dy > 14 {
+		t.Fatalf("expected 外观主题 and segmented controls on the same row, lbl.Y=%.1f auto.Y=%.1f", themeLbl.Y, autoBtn.Y)
+	}
+}
+
+func TestSheetRigidPreventsUpwardDragGap(t *testing.T) {
+	app := newTestAppState(t)
+	tt := ui.NewTester(app.View, 402, 844)
+	tt.SetInsets(44, 0, 24, 0)
+
+	// 打开单挡位表单抽屉（0.92），已在顶部尽头时继续用力向上拖动，面板不能被拉起露出底部空白
+	app.OpenNewJournalModal("", "")
+	tt.Frame()
+	advanceUI(tt, 600*time.Millisecond)
+	cancelBefore, ok := tt.Find("取消")
+	if !ok {
+		t.Fatalf("expected journal composer sheet visible, texts=%q", tt.Texts())
+	}
+	// 在弹窗顶部手柄区域用力向上拉 220dp
+	touchSwipe(tt, 200, cancelBefore.Y-10, 200, max(float32(0), cancelBefore.Y-230), 8)
+	cancelDuring, ok := tt.Find("取消")
+	if !ok {
+		t.Fatal("expected sheet still open")
+	}
+	if cancelDuring.Y < cancelBefore.Y-4 {
+		t.Fatalf("expected rigid sheet clamped at top detent with no upward overscroll gap: beforeY=%.1f duringY=%.1f", cancelBefore.Y, cancelDuring.Y)
+	}
+}
+
+func TestJournalExportNoJsonAndAutoLayoutShareCards(t *testing.T) {
+	app := newTestAppState(t)
+	tt := ui.NewTester(app.View, 402, 844)
+	tt.SetInsets(44, 0, 24, 0)
+
+	if err := tt.Click("日志"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 120*time.Millisecond)
+	if err := tt.Click("分享或导出"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 400*time.Millisecond)
+	if tt.HasText("导出为 JSON 文件") {
+		t.Fatalf("expected JSON export removed from journal export sheet, texts=%q", tt.Texts())
+	}
+	if !tt.HasText("生成精美分享长图") || !tt.HasText("导出为 CSV 表格") {
+		t.Fatalf("expected image share and CSV export options, texts=%q", tt.Texts())
+	}
+
+	// 验证四类自动排版分享图（单条日志明信片、日志长图海报、单鸟时令指南卡、追鸟备忘清单图）均能正常 2x 高清渲染
+	entry := model.JournalEntry{
+		ID:          "e1",
+		SpeciesCode: "comkin1",
+		ComName:     "普通翠鸟",
+		SciName:     "Alcedo atthis",
+		Order:       "佛法僧目",
+		FamilyName:  "翠鸟科",
+		ObservedAt:  "2026-11-26 08:20",
+		Location:    "北京市 朝阳区",
+		Count:       2,
+		Notes:       "清晨停在枯荷枝上俯冲入水捕鱼，羽毛在顺光下闪烁宝石蓝光泽。",
+	}
+	c1 := RenderJournalEntryShareCard(entry, nil)
+	if c1 == nil || c1.Bounds().Dx() != 840 || c1.Bounds().Dy() < 600 {
+		t.Fatalf("unexpected journal entry share card bounds: %v", c1.Bounds())
+	}
+	c2 := RenderJournalSummaryShareCard([]model.JournalEntry{entry}, 12, nil)
+	if c2 == nil || c2.Bounds().Dx() != 840 {
+		t.Fatalf("unexpected journal summary share card bounds: %v", c2.Bounds())
+	}
+	bird, ok := api.FindSeasonalBirdByCode("blfspo1")
+	if !ok {
+		t.Fatal("expected blfspo1 in seasonal database")
+	}
+	c3 := RenderSeasonalBirdShareCard(bird, model.ZoneSouth, 11, "广东", nil)
+	if c3 == nil || c3.Bounds().Dx() != 840 {
+		t.Fatalf("unexpected seasonal bird share card bounds: %v", c3.Bounds())
+	}
+	c4 := RenderMemoListShareCard([]model.BirdingMemo{
+		{ComName: "黑脸琵鹭", RegionName: "广东", TargetMonth: 11, TargetDate: "2026-11-28", Location: "深圳福田红树林", Notes: "退潮后 1 小时"},
+	}, "广东", 11)
+	if c4 == nil || c4.Bounds().Dx() != 840 {
+		t.Fatalf("unexpected memo list share card bounds: %v", c4.Bounds())
+	}
+}
+
+func TestSeasonalBirdingGuideCenteredTabDetailAndMemos(t *testing.T) {
+	app := newTestAppState(t)
+	app.seasonalMonth = 11
+	app.seasonalRegionCode = "CN-11"
+	app.seasonalRegionLabel = "北京"
+
+	tt := ui.NewTester(app.View, 402, 844)
+	tt.SetInsets(44, 0, 24, 0)
+	advanceUI(tt, 64*time.Millisecond)
+
+	// 1. 验证「指南」按钮精确位于底部 5 栏导航栏正中央（402dp 宽屏中心为 201dp）
+	sRect, okS := tt.Find("指南")
+	if !okS {
+		t.Fatalf("expected bottom tab 指南 visible, texts=%q", tt.Texts())
+	}
+	seasonalMid := sRect.X + sRect.W/2
+	if seasonalMid < 197 || seasonalMid > 205 || sRect.Y < 740 {
+		t.Fatalf("expected 指南 dead-center in bottom dock (x≈201, y>740): rect=%+v mid=%.1f", sRect, seasonalMid)
+	}
+
+	// 2. 点击「指南」进入观鸟指南主页，校验四个分类（马上离开 / 当季 / 刚到 / 马上到）
+	if err := tt.Click("指南"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 120*time.Millisecond)
+	if app.session.Tab != 2 || app.router.Path() != "/seasonal" {
+		t.Fatalf("expected /seasonal tab=2, got tab=%d path=%q", app.session.Tab, app.router.Path())
+	}
+	for _, cat := range []string{"马上离开", "当季", "刚到", "马上到"} {
+		if !tt.HasText(cat) {
+			t.Fatalf("expected seasonal category %q visible, texts=%q", cat, tt.Texts())
+		}
+	}
+
+	// 3. 点击当季任意鸟类卡片应进入 /seasonal/{code} 时令详情页（绝非直接跳图鉴），且包含羽色变化、月历与「进入鸟类图鉴」按钮
+	inSeason := api.SeasonalBirdsByRegionAndMonth("CN-11", 11)[model.PhaseInSeason]
+	if len(inSeason) == 0 {
+		t.Fatal("expected in-season birds for Beijing November")
+	}
+	firstBird := inSeason[0]
+	if err := tt.Click(firstBird.ComName + " 时令详情"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 500*time.Millisecond)
+	wantPath := "/seasonal/" + firstBird.SpeciesCode
+	if app.router.Path() != wantPath {
+		t.Fatalf("expected seasonal detail route %q (not /guide/), got %q", wantPath, app.router.Path())
+	}
+	if !tt.HasText("全年物候月历") || !tt.HasText("羽色与季节变化") || !tt.HasText("添加到日历") || !tt.HasText("进入鸟类图鉴查看鸣声与百科 ↗") {
+		t.Fatalf("expected seasonal detail sections and guide CTA, texts=%q", tt.Texts())
+	}
+
+	// 4. 在时令详情页加入追鸟备忘，滑到底部并点击「进入鸟类图鉴」跳转图鉴页
+	if err := tt.Click("加入追鸟备忘"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 80*time.Millisecond)
+	if !app.store.HasActiveMemo(firstBird.SpeciesCode, 11) {
+		t.Fatal("expected memo saved for seasonal bird")
+	}
+	for range 3 {
+		touchSwipe(tt, 200, 720, 200, 140, 8)
+		advanceUI(tt, 250*time.Millisecond)
+	}
+	if err := tt.Click("进入鸟类图鉴查看鸣声与百科 ↗"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 500*time.Millisecond)
+	if app.router.Path() != "/guide/"+firstBird.SpeciesCode {
+		t.Fatalf("expected jump to /guide/%s from seasonal detail, got %q", firstBird.SpeciesCode, app.router.Path())
+	}
+
+	// 返回时令详情 -> 返回观鸟指南 -> 底栏仍保持高亮在「指南」(Tab=2)
+	tt.MobileBack()
+	advanceUI(tt, 500*time.Millisecond)
+	tt.MobileBack()
+	advanceUI(tt, 500*time.Millisecond)
+	if app.router.Path() != "/seasonal" || app.session.Tab != 2 {
+		t.Fatalf("expected returned to /seasonal with tab=2, got path=%q tab=%d", app.router.Path(), app.session.Tab)
 	}
 }

@@ -15,9 +15,9 @@
     ],
     "adaptiveIcon": {
       "foreground": "resources/icon-foreground.png",
-      "background": "#0284C7"
+      "background": "#4D9488"
     },
-    "splash": "#F3F5F9"
+    "splash": "#F7F8FB"
   },
   "ios": {
     "orientations": [

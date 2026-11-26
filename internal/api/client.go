@@ -16,11 +16,12 @@ const defaultUserAgent = "Birdview/2.0 (Go + MyGo Mobile)"
 
 // Client 封装遵循系统代理（netproxy）的统一 HTTP 客户端。
 type Client struct {
-	HTTP         *http.Client
-	EBirdBaseURL string
-	INatBaseURL  string
-	WikiBaseURL  string
-	XenoBaseURL  string
+	HTTP           *http.Client
+	EBirdBaseURL   string
+	INatBaseURL    string
+	WikiBaseURL    string
+	XenoBaseURL    string
+	GeocodeBaseURL string
 }
 
 // NewClient 创建使用系统代理、默认超时 30 秒的 API 客户端。

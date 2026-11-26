@@ -22,6 +22,21 @@ func maskKeyShort(k string) string {
 	return fmt.Sprintf("...%s", trimmed[len(trimmed)-4:])
 }
 
+func apiKeysStatusSummary(ebirdKey, xenoKey string) string {
+	hasE := strings.TrimSpace(ebirdKey) != ""
+	hasX := strings.TrimSpace(xenoKey) != ""
+	switch {
+	case hasE && hasX:
+		return "均已配置"
+	case hasE:
+		return "eBird 已配"
+	case hasX:
+		return "Xeno 已配"
+	default:
+		return "未配置"
+	}
+}
+
 func settingsRow(c *ui.Context, key, title, value string, t *ui.Theme, trailing func()) ui.Element {
 	row := ui.Row(c.Key(key)).FillWidth().Padding(14, 16).Gap(10).AlignItems(ui.Center).
 		Role(ui.RoleButton).Label(title)
@@ -48,15 +63,10 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
 			ui.Scroll(c.Key("settings-scroll")).Fill().Children(func() {
 				ui.Column(c).FillWidth().Padding(10, 18, dockClearancePad(c, 24), 18).Gap(14).Children(func() {
-					// 1. 数据接口与密钥
-					tactileCard(c, t).Clip().Dividers(1, subtleHairlineColor(t)).Children(func() {
-						if settingsRow(c, "set-row-ebird", "eBird API Key", maskKeyShort(a.store.LoadEbirdKey()), t, nil).Clicked() {
-							a.syncSettingsDraft()
-							a.setVerifyMsg = ""
-							a.setKeySheetOpen = true
-						}
-
-						if settingsRow(c, "set-row-xeno", "Xeno-canto Key", maskKeyShort(a.store.LoadXenoKey()), t, nil).Clicked() {
+					// 1. 数据接口与密钥（合并入口）
+					tactileCard(c, t).Clip().Children(func() {
+						keyStatus := apiKeysStatusSummary(a.store.LoadEbirdKey(), a.store.LoadXenoKey())
+						if settingsRow(c, "set-row-api-keys", "数据源密钥", keyStatus, t, nil).Clicked() {
 							a.syncSettingsDraft()
 							a.setVerifyMsg = ""
 							a.setKeySheetOpen = true
@@ -71,8 +81,8 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 							a.regRegionSheetOpen = true
 						}
 
-						ui.Column(c).FillWidth().Padding(14, 16).Gap(10).Children(func() {
-							ui.Text(c, "外观主题").FontSize(15).FontWeight(500)
+						ui.Row(c).FillWidth().Padding(11, 16).Gap(12).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+							ui.Text(c, "外观主题").FontSize(15).FontWeight(500).Shrink(0)
 							themeIdx := 0
 							switch a.setThemeMode {
 							case "浅色":
@@ -80,7 +90,7 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 							case "深色":
 								themeIdx = 2
 							}
-							if tactileSegmentedControl(c, "set-theme-seg", &themeIdx, t, "跟随系统", "浅色", "深色") {
+							if tactileCompactSegment(c, "set-theme-seg", &themeIdx, t, "自动", "浅色", "深色") {
 								modes := []string{"跟随系统", "浅色", "深色"}
 								a.setThemeMode = modes[themeIdx]
 								a.saveThemePreferenceOnly(c, themeModeFromLabel(a.setThemeMode))
@@ -135,7 +145,7 @@ func (a *AppState) viewSettingsKeySheet(c *ui.Context, t *ui.Theme) {
 	mobile.Sheet(c, &a.setKeySheetOpen, mobile.SheetOptions{
 		Detents:    []float32{0.68, 0.9},
 		Background: &sheetBg,
-		Label:      "API 密钥设置",
+		Label:      "数据源密钥",
 	}, func() {
 		ui.Column(c).Fill().Children(func() {
 			ui.Row(c).FillWidth().Padding(8, 20, 14, 20).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
@@ -146,7 +156,7 @@ func (a *AppState) viewSettingsKeySheet(c *ui.Context, t *ui.Theme) {
 				if cancelBtn.Clicked() {
 					a.setKeySheetOpen = false
 				}
-				ui.Text(c, "API 密钥设置").FontSize(16).FontWeight(600)
+				ui.Text(c, "数据源密钥").FontSize(16).FontWeight(600)
 				if filterPill(c, "sk-save", "保存设置", true, t).Clicked() {
 					a.saveKeysFromUI(c)
 				}
@@ -292,6 +302,8 @@ func (a *AppState) saveRegionPreferenceOnly(c *ui.Context, nextRegion string) {
 	}
 	a.regionalRegion = nextRegion
 	a.regRegionLabel = regionLabelByCode(nextRegion)
+	a.seasonalRegionCode = nextRegion
+	a.seasonalRegionLabel = regionLabelByCode(nextRegion)
 	if a.win != nil && prevRegion != nextRegion {
 		a.loadTaxonomyAsync(false)
 	}

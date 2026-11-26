@@ -111,7 +111,7 @@ func (r *Router) giveUpSwipe(rt *engine) {
 	r.settling = true
 	now := rt.now()
 	r.settle = channel{value: float64(r.swipe), target: float64(r.swipe), at: now}
-	headFor(&r.settle, 0, Animation{Duration: slideTime, Ease: EaseOut}, now)
+	headFor(&r.settle, 0, Animation{Spring: SpringOptions{Duration: 280 * time.Millisecond, Bounce: 0, Precision: 0.002}}, now)
 	rt.swipeRouter = r
 	rt.requestFrame()
 }
@@ -157,9 +157,9 @@ func (rt *engine) backGesture(phase string, progress float32) {
 		if !r.swiping {
 			return
 		}
-		// The system's progress follows the finger with a curve: the page
-		// goes part of the way, as the back gesture's preview does.
-		r.swipe = progress * 0.35
+		// Smooth ease-out curve for responsive predictive back preview.
+		p := max(float32(0), min(progress, 1))
+		r.swipe = (1 - (1-p)*(1-p)) * 0.42
 	case "cancelled":
 		if r.swiping {
 			r.giveUpSwipe(rt)

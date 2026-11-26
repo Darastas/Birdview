@@ -40,12 +40,16 @@ func (mygoSecretStore) Delete(key string) error             { return mygo.Secret
 
 // Store 管理本地设置、个人观鸟日志、媒体附件与已解锁鸟种。
 type Store struct {
-	mu       sync.RWMutex
-	dir      string
-	secrets  SecretStore
-	settings model.Settings
-	entries  []model.JournalEntry
-	unlocked map[string]model.UnlockedBird
+	mu             sync.RWMutex
+	dir            string
+	secrets        SecretStore
+	settings       model.Settings
+	entries        []model.JournalEntry
+	unlocked       map[string]model.UnlockedBird
+	ebirdKeyCached string
+	ebirdKeyLoaded bool
+	xenoKeyCached  string
+	xenoKeyLoaded  bool
 }
 
 // New 创建并加载指定数据目录下的持久化 Store。
@@ -158,35 +162,87 @@ func (s *Store) SaveSettings(cfg model.Settings) error {
 	return writeJSON(s.settingsPath(), cfg)
 }
 
-// LoadEbirdKey 按优先级读取 eBird API Key：系统凭据管理器 -> 本地回退配置 -> 环境变量 EBIRD_API_KEY。
+// LoadEbirdKey 按优先级读取 eBird API Key（带内存缓存，避免 UI 渲染帧重复穿透 Android Keystore JNI）。
 func (s *Store) LoadEbirdKey() string {
-	return s.loadSecret(ebirdSecretKey, func(cfg model.Settings) string {
+	s.mu.RLock()
+	if s.ebirdKeyLoaded {
+		v := s.ebirdKeyCached
+		s.mu.RUnlock()
+		if v != "" {
+			return v
+		}
+		return strings.TrimSpace(os.Getenv("EBIRD_API_KEY"))
+	}
+	s.mu.RUnlock()
+
+	v := s.loadSecretStored(ebirdSecretKey, func(cfg model.Settings) string {
 		return cfg.EbirdKeyBackup
-	}, "EBIRD_API_KEY")
+	})
+	s.mu.Lock()
+	s.ebirdKeyCached = v
+	s.ebirdKeyLoaded = true
+	s.mu.Unlock()
+	if v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("EBIRD_API_KEY"))
 }
 
 // SaveEbirdKey 保存 eBird API Key，优先写入系统凭据管理器，不支持时回退至本地配置。
 func (s *Store) SaveEbirdKey(key string) error {
-	return s.saveSecret(ebirdSecretKey, key, func(cfg *model.Settings, val string) {
+	if err := s.saveSecret(ebirdSecretKey, key, func(cfg *model.Settings, val string) {
 		cfg.EbirdKeyBackup = val
-	})
+	}); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.ebirdKeyCached = strings.TrimSpace(key)
+	s.ebirdKeyLoaded = true
+	s.mu.Unlock()
+	return nil
 }
 
-// LoadXenoKey 读取可选的 Xeno-canto API v3 Key。
+// LoadXenoKey 读取可选的 Xeno-canto API v3 Key（带内存缓存）。
 func (s *Store) LoadXenoKey() string {
-	return s.loadSecret(xenoSecretKey, func(cfg model.Settings) string {
+	s.mu.RLock()
+	if s.xenoKeyLoaded {
+		v := s.xenoKeyCached
+		s.mu.RUnlock()
+		if v != "" {
+			return v
+		}
+		return strings.TrimSpace(os.Getenv("XENO_CANTO_API_KEY"))
+	}
+	s.mu.RUnlock()
+
+	v := s.loadSecretStored(xenoSecretKey, func(cfg model.Settings) string {
 		return cfg.XenoKeyBackup
-	}, "XENO_CANTO_API_KEY")
+	})
+	s.mu.Lock()
+	s.xenoKeyCached = v
+	s.xenoKeyLoaded = true
+	s.mu.Unlock()
+	if v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("XENO_CANTO_API_KEY"))
 }
 
 // SaveXenoKey 保存可选的 Xeno-canto API v3 Key。
 func (s *Store) SaveXenoKey(key string) error {
-	return s.saveSecret(xenoSecretKey, key, func(cfg *model.Settings, val string) {
+	if err := s.saveSecret(xenoSecretKey, key, func(cfg *model.Settings, val string) {
 		cfg.XenoKeyBackup = val
-	})
+	}); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.xenoKeyCached = strings.TrimSpace(key)
+	s.xenoKeyLoaded = true
+	s.mu.Unlock()
+	return nil
 }
 
-func (s *Store) loadSecret(secretName string, backupGetter func(model.Settings) string, envName string) string {
+func (s *Store) loadSecretStored(secretName string, backupGetter func(model.Settings) string) string {
 	if s.secrets != nil {
 		if b, err := s.secrets.Get(secretName); err == nil {
 			if v := strings.TrimSpace(string(b)); v != "" {
@@ -197,10 +253,7 @@ func (s *Store) loadSecret(secretName string, backupGetter func(model.Settings) 
 	s.mu.RLock()
 	backup := strings.TrimSpace(backupGetter(s.settings))
 	s.mu.RUnlock()
-	if backup != "" {
-		return backup
-	}
-	return strings.TrimSpace(os.Getenv(envName))
+	return backup
 }
 
 func (s *Store) saveSecret(secretName, rawVal string, backupSetter func(*model.Settings, string)) error {

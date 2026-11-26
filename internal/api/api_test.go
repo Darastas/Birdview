@@ -229,3 +229,70 @@ func TestFetchSpeciesGuideMediaProgressiveDecouplesSlowWiki(t *testing.T) {
 		t.Fatalf("expected iNaturalist photos & sounds preserved, got %+v", finalMedia)
 	}
 }
+
+func TestChinaRegionsCleanNamesReverseGeocodeAndSeasonalData(t *testing.T) {
+	// 1. 观鸟地区名称不再展示 (CN-XX) / (HK) 等代号后缀
+	if len(ChinaRegions) < 30 {
+		t.Fatalf("expected at least 30 China regions, got %d", len(ChinaRegions))
+	}
+	for _, r := range ChinaRegions {
+		if strings.Contains(r.Name, "(") || strings.Contains(r.Name, "CN-") {
+			t.Fatalf("region display name should not contain code suffix: %+v", r)
+		}
+		if r.Code == "" {
+			t.Fatalf("region code should remain populated for API calls: %+v", r)
+		}
+	}
+
+	// 2. 反向地理编码：在线 BigDataCloud 响应与离线中国城市坐标回退
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"principalSubdivision":"北京市","city":"北京市","locality":"朝阳区"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient()
+	c.GeocodeBaseURL = srv.URL
+	if got := c.ReverseGeocodeCity(context.Background(), 39.99, 116.40); got != "北京市 朝阳区" {
+		t.Fatalf("expected online geocode 北京市 朝阳区, got %q", got)
+	}
+
+	// 离线兜底（指向无效端点）仍能准确返回最近的中国城市名称，不再只显示经纬度
+	cOffline := NewClient()
+	cOffline.GeocodeBaseURL = "http://127.0.0.1:1"
+	if got := cOffline.ReverseGeocodeCity(context.Background(), 30.658, 104.065); got != "成都市" {
+		t.Fatalf("expected offline nearest city 成都市, got %q", got)
+	}
+	if got := cOffline.ReverseGeocodeCity(context.Background(), 22.54, 114.05); got != "深圳市" {
+		t.Fatalf("expected offline nearest city 深圳市, got %q", got)
+	}
+
+	// 3. 观鸟指南数据库完整性与多区多月分类查询
+	if len(SeasonalBirdGuideDatabase) < 25 {
+		t.Fatalf("expected rich seasonal guide database (>=25 species), got %d", len(SeasonalBirdGuideDatabase))
+	}
+	seen := make(map[string]bool)
+	for _, b := range SeasonalBirdGuideDatabase {
+		if b.SpeciesCode == "" || b.ComName == "" || b.SciName == "" || b.NationalSpots == "" || b.PlumageChanges == "" {
+			t.Fatalf("incomplete seasonal bird record: %+v", b)
+		}
+		if seen[b.SpeciesCode] {
+			t.Fatalf("duplicate seasonal species code: %s", b.SpeciesCode)
+		}
+		seen[b.SpeciesCode] = true
+	}
+	bjNov := SeasonalBirdsByRegionAndMonth("CN-11", 11)
+	if len(bjNov[model.PhaseInSeason]) == 0 || len(bjNov[model.PhaseLeaving]) == 0 {
+		t.Fatalf("expected Beijing November guide to have in-season and leaving birds, got %+v", bjNov)
+	}
+	if _, ok := FindSeasonalBirdByCode("blfspo1"); !ok {
+		t.Fatal("expected blfspo1 in seasonal guide database")
+	}
+	blncra, ok := FindSeasonalBirdByCode("blncra1")
+	if !ok {
+		t.Fatal("expected blncra1 in seasonal guide database")
+	}
+	if blncra.PhaseFor(model.ZoneNorth, 11) != model.PhaseAbsent || blncra.PhaseFor(model.ZoneSouthwest, 11) != model.PhaseInSeason || blncra.PhaseFor(model.ZoneNational, 11) != model.PhaseInSeason {
+		t.Fatalf("expected strict zone filtering for 黑颈鹤: north=%v sw=%v national=%v",
+			blncra.PhaseFor(model.ZoneNorth, 11), blncra.PhaseFor(model.ZoneSouthwest, 11), blncra.PhaseFor(model.ZoneNational, 11))
+	}
+}

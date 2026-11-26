@@ -15,9 +15,11 @@ import (
 type memorySecretStore struct {
 	data        map[string][]byte
 	unsupported bool
+	getCalls    int
 }
 
 func (m *memorySecretStore) Get(key string) ([]byte, error) {
+	m.getCalls++
 	if m.unsupported {
 		return nil, errors.ErrUnsupported
 	}
@@ -243,5 +245,72 @@ func TestCacheSpeciesMediaRoundTrip(t *testing.T) {
 	}
 	if _, ok := c.LoadSpeciesMedia("comkin1", 7*24*time.Hour); !ok {
 		t.Fatal("expected 48h-old cache still accepted within 7d limit")
+	}
+}
+
+func TestStoreSecretCachingMemosAndICS(t *testing.T) {
+	dir := t.TempDir()
+	sec := &memorySecretStore{
+		data: map[string][]byte{
+			ebirdSecretKey: []byte("cached-ebird"),
+			xenoSecretKey:  []byte("cached-xeno"),
+		},
+	}
+	st, err := New(dir, sec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 连续读取 20 次只应穿透底层凭据库 2 次（eBird 与 Xeno 各一次），防止每帧 JNI 卡顿
+	for i := 0; i < 20; i++ {
+		if got := st.LoadEbirdKey(); got != "cached-ebird" {
+			t.Fatalf("expected cached-ebird, got %q", got)
+		}
+		if got := st.LoadXenoKey(); got != "cached-xeno" {
+			t.Fatalf("expected cached-xeno, got %q", got)
+		}
+	}
+	if sec.getCalls != 2 {
+		t.Fatalf("expected SecretStore.Get called only twice (cached), got %d", sec.getCalls)
+	}
+
+	// 追鸟备忘增删改查与排序
+	m1, err := st.AddMemo(model.BirdingMemo{
+		SpeciesCode: "blfspo1",
+		ComName:     "黑脸琵鹭",
+		SciName:     "Platalea minor",
+		RegionName:  "广东",
+		TargetMonth: 11,
+		TargetDate:  "2026-11-28",
+		PhaseLabel:  "当季",
+		Location:    "深圳福田红树林",
+		Notes:       "退潮后 1 小时最佳",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.HasActiveMemo("blfspo1", 11) {
+		t.Fatal("expected blfspo1 active memo in month 11")
+	}
+	if err := st.ToggleMemoDone(m1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st.HasActiveMemo("blfspo1", 11) {
+		t.Fatal("expected completed memo no longer active")
+	}
+	if err := st.DeleteMemo(m1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Memos()) != 0 {
+		t.Fatalf("expected memos empty after delete, got %d", len(st.Memos()))
+	}
+
+	// ICS 日历生成校验
+	start := time.Date(2026, 11, 28, 7, 30, 0, 0, time.Local)
+	ics := BuildCalendarICS("观鸟计划：黑脸琵鹭", "深圳福田红树林", "退潮观鸟", start, 2*time.Hour)
+	for _, want := range []string{"BEGIN:VCALENDAR", "BEGIN:VEVENT", "SUMMARY:观鸟计划：黑脸琵鹭", "LOCATION:深圳福田红树林", "BEGIN:VALARM", "END:VCALENDAR"} {
+		if !strings.Contains(ics, want) {
+			t.Fatalf("expected ICS to contain %q, got:\n%s", want, ics)
+		}
 	}
 }

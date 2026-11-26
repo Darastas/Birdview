@@ -686,16 +686,19 @@ func (a *AppState) viewExplorePhotoDetail(c *ui.Context, t *ui.Theme, _ string) 
 					To:    ui.RGBA(0, 0, 0, 0),
 					Angle: 180,
 				})
-				if liquidGlassCircleBtn(c, "ep-back-btn", "返回", iconBack, 38).
+				transitioning := a.router.Transitioning()
+				if liquidGlassCircleBtnFast(c, "ep-back-btn", "返回", iconBack, 38, transitioning).
 					Absolute().Left(16).Top(topBtnY).Clicked() {
 					a.goBack()
 				}
 				if count > 0 {
-					ui.Textf(c, "%d / %d", a.regPhotoPager.Page+1, count).
-						Absolute().Left(18).Bottom(38).Padding(4, 10).Radius(999).
-						Material(photoOverlayGlass(false)).
-						FontSize(12).FontWeight(500).FontFeatures("tnum").
-						TextColor(ui.RGB(255, 255, 255))
+					applyPhotoOverlayGlass(
+						ui.Textf(c, "%d / %d", a.regPhotoPager.Page+1, count).
+							Absolute().Left(18).Bottom(38).Padding(4, 10).Radius(999).
+							FontSize(12).FontWeight(500).FontFeatures("tnum").
+							TextColor(ui.RGB(255, 255, 255)),
+						transitioning, false,
+					)
 					if count > 1 {
 						ui.Box(c).Absolute().Right(16).Bottom(40).Children(func() {
 							mobile.PageDots(c, a.regPhotoPager.Page, count)
@@ -1062,7 +1065,7 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 					})
 				}
 
-				minimalSearchBar(c, "rp-search", &a.regRegionQuery, "搜索省市名称或区号", "搜索地区", t)
+				minimalSearchBar(c, "rp-search", &a.regRegionQuery, "搜索省市或地区", "搜索地区", t)
 			})
 
 			ui.Scroll(c.Key("rp-list")).Grow(1).Basis(0).FillWidth().Padding(4, 18, 28, 18).Children(func() {
@@ -1074,9 +1077,12 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 							continue
 						}
 						active := false
-						if a.regRegionTarget == "settings" {
+						switch a.regRegionTarget {
+						case "settings":
 							active = a.setRegionLabel == r.Name
-						} else {
+						case "seasonal":
+							active = strings.EqualFold(a.seasonalRegionCode, r.Code)
+						default:
 							active = a.regCustomCode == "" && a.regRegionLabel == r.Name
 						}
 						row := ui.Row(c.Key("regopt-"+r.Code)).FillWidth().Padding(13, 16).
@@ -1094,10 +1100,15 @@ func (a *AppState) viewRegionPickerSheet(c *ui.Context, t *ui.Theme) {
 						})
 						if row.Clicked() {
 							a.regRegionSheetOpen = false
-							if a.regRegionTarget == "settings" {
+							switch a.regRegionTarget {
+							case "settings":
 								a.setRegionLabel = r.Name
 								a.saveRegionPreferenceOnly(c, r.Code)
-							} else {
+							case "seasonal":
+								a.seasonalRegionCode = r.Code
+								a.seasonalRegionLabel = r.Name
+								a.seasonalScroll.Y = 0
+							default:
 								a.regCustomCode = ""
 								a.regRegionLabel = r.Name
 								a.resetExploreForRegionChange()
