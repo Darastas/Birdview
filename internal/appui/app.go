@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Darastas/Birdview/internal/api"
@@ -60,7 +61,11 @@ type AppState struct {
 	session *MobileSession
 	router  *ui.Router
 
-	pendingToast string
+	pendingToast     string
+	toastQueue       []string
+	toastShownAt     time.Time
+	toastID          uint64
+	startupPreloaded bool
 
 	// 本地用户照片内存缓存（网络图已交由 ui/netimage 统一缓存与按需下载）
 	localImgCache   map[string]ui.ImageSource
@@ -126,6 +131,7 @@ type AppState struct {
 	regSelectedObs      *model.Observation
 	regStat             *model.RegionStat
 	regStatKey          string
+	regStatBusy         bool
 	regChecklistMap     map[string]*model.ChecklistDetail
 	regChecklistBusy    map[string]bool
 
@@ -308,11 +314,131 @@ func NewAppState(st *store.Store, cache *store.Cache, client *api.Client, sess *
 	return a
 }
 
-// AttachWindow 绑定主窗口句柄，并触发启动后的异步名录拉取。
+// AttachWindow 绑定主窗口句柄，并在启动时立即后台预加载全量核心内容（名录、探索 4 个子页、时令指南及图鉴缩略图）。
 func (a *AppState) AttachWindow(win *mygo.Window) {
 	a.win = win
 	a.loadTaxonomyAsync(false)
-	a.onTabActivated(a.session.Tab)
+	a.PreloadAllOnStartup()
+}
+
+// PreloadAllOnStartup 启动后并发预加载各页面内容，消除切页等待。
+func (a *AppState) PreloadAllOnStartup() {
+	if a.startupPreloaded {
+		return
+	}
+	a.startupPreloaded = true
+	a.preloadExploreAllSubTabs()
+	a.preloadSeasonalAndGuideThumbs()
+	a.preloadJournalCovers()
+}
+
+func (a *AppState) preloadGuideTopThumbs() {
+	var urls []string
+	limit := min(12, len(a.filteredTaxa))
+	for i := 0; i < limit; i++ {
+		if u := a.speciesThumbURL(a.filteredTaxa[i].SpeciesCode); u != "" {
+			urls = append(urls, u)
+		}
+	}
+	if len(urls) > 0 {
+		netimage.Preload(urls...)
+	}
+}
+
+func (a *AppState) preloadJournalCovers() {
+	entries := a.store.Entries()
+	limit := min(6, len(entries))
+	for i := 0; i < limit; i++ {
+		if len(entries[i].PhotoPaths) > 0 {
+			a.loadLocalImageAsync(entries[i].PhotoPaths[0])
+		}
+	}
+}
+
+func (a *AppState) preloadSeasonalAndGuideThumbs() {
+	if a.win == nil {
+		return
+	}
+	month := a.seasonalMonth
+	if month < 1 || month > 12 {
+		month = int(time.Now().Month())
+	}
+	regionCode := fallbackText(a.seasonalRegionCode, a.store.Settings().DefaultRegion)
+	grouped := api.SeasonalBirdsByRegionAndMonth(regionCode, month)
+	var targets []model.Taxon
+	seen := make(map[string]bool)
+	for _, ph := range []model.SeasonalPhase{model.PhaseInSeason, model.PhaseJustArrived, model.PhaseLeaving, model.PhaseArrivingSoon} {
+		for _, b := range grouped[ph] {
+			if seen[b.SpeciesCode] {
+				continue
+			}
+			seen[b.SpeciesCode] = true
+			targets = append(targets, a.seasonalTaxonFor(b))
+		}
+	}
+
+	var warmURLs []string
+	var missing []model.Taxon
+	for _, tx := range targets {
+		if u := a.speciesThumbURL(tx.SpeciesCode); u != "" {
+			warmURLs = append(warmURLs, u)
+		} else if !a.thumbTried[tx.SpeciesCode] {
+			missing = append(missing, tx)
+		}
+	}
+	for i := 0; i < min(12, len(a.filteredTaxa)); i++ {
+		tx := a.filteredTaxa[i]
+		if u := a.speciesThumbURL(tx.SpeciesCode); u != "" {
+			warmURLs = append(warmURLs, u)
+		} else if !seen[tx.SpeciesCode] && !a.thumbTried[tx.SpeciesCode] {
+			seen[tx.SpeciesCode] = true
+			missing = append(missing, tx)
+		}
+	}
+	if len(warmURLs) > 0 {
+		netimage.Preload(warmURLs...)
+	}
+	if len(missing) == 0 {
+		return
+	}
+	if len(missing) > 16 {
+		missing = missing[:16]
+	}
+
+	go func(items []model.Taxon) {
+		sem := make(chan struct{}, 2)
+		var wg sync.WaitGroup
+		for _, item := range items {
+			tx := item
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() {
+					time.Sleep(80 * time.Millisecond)
+					<-sem
+				}()
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				u, err := a.client.FetchSpeciesThumbWithFallback(ctx, tx.SciName, tx.ComName)
+				cancel()
+				if err != nil || u == "" {
+					return
+				}
+				netimage.Preload(strings.Replace(u, "/medium.", "/small.", 1))
+				a.updateUI(func() {
+					delete(a.thumbFailAt, tx.SpeciesCode)
+					a.thumbMap[tx.SpeciesCode] = u
+				})
+			}()
+		}
+		wg.Wait()
+		if a.cache != nil {
+			a.updateUI(func() {
+				snapshot := copyStringMap(a.thumbMap)
+				go func() { _ = a.cache.SaveThumbIndex(snapshot) }()
+			})
+		}
+	}(missing)
 }
 
 // SetRecorder 注入自定义录音器（测试用途）。
@@ -534,7 +660,7 @@ func (a *AppState) View(c *ui.Context) {
 	}
 
 	if a.pendingToast != "" {
-		c.Toast(a.pendingToast)
+		a.showToast(a.pendingToast)
 		a.pendingToast = ""
 	}
 
@@ -610,6 +736,133 @@ func (a *AppState) View(c *ui.Context) {
 	a.viewSettingsAboutSheet(c, t)
 	a.viewShareImagePreviewOverlay(c, t)
 	a.viewPhotoZoomOverlay(c, t)
+	a.viewToastBanner(c, t)
+}
+
+// showToast appends a status message into the FIFO queue so toasts display sequentially one at a time.
+func (a *AppState) showToast(msg string) {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return
+	}
+	if n := len(a.toastQueue); n > 0 && a.toastQueue[n-1] == msg {
+		return
+	}
+	if len(a.toastQueue) >= 5 {
+		a.toastQueue = append(a.toastQueue[1:], msg)
+	} else {
+		a.toastQueue = append(a.toastQueue, msg)
+	}
+	a.toastID++
+	a.invalidateUI()
+}
+
+// viewToastBanner renders a single Birdview-styled top capsule toast and advances the queue via c.Now().
+func (a *AppState) viewToastBanner(c *ui.Context, t *ui.Theme) {
+	if len(a.toastQueue) == 0 {
+		a.toastShownAt = time.Time{}
+		return
+	}
+	const (
+		toastEnterDur = 200 * time.Millisecond
+		toastHoldDur  = 1350 * time.Millisecond
+		toastExitDur  = 180 * time.Millisecond
+		toastTotalDur = toastEnterDur + toastHoldDur + toastExitDur
+	)
+	now := c.Now()
+	if a.toastShownAt.IsZero() {
+		a.toastShownAt = now
+	}
+	elapsed := now.Sub(a.toastShownAt)
+	for len(a.toastQueue) > 0 && elapsed >= toastTotalDur {
+		a.toastQueue = a.toastQueue[1:]
+		if len(a.toastQueue) == 0 {
+			a.toastShownAt = time.Time{}
+			return
+		}
+		a.toastShownAt = a.toastShownAt.Add(toastTotalDur)
+		elapsed = now.Sub(a.toastShownAt)
+	}
+	if elapsed < 0 {
+		elapsed = 0
+		a.toastShownAt = now
+	}
+
+	var alpha float32 = 1
+	var slideY float32 = 0
+	if elapsed < toastEnterDur {
+		p := float32(elapsed) / float32(toastEnterDur)
+		if p < 0 {
+			p = 0
+		}
+		if p > 1 {
+			p = 1
+		}
+		inv := 1 - p
+		ease := 1 - inv*inv*inv
+		alpha = ease
+		slideY = (1 - ease) * -10
+		c.AnimationFrame()
+	} else if elapsed >= toastEnterDur+toastHoldDur {
+		p := float32(elapsed-(toastEnterDur+toastHoldDur)) / float32(toastExitDur)
+		if p < 0 {
+			p = 0
+		}
+		if p > 1 {
+			p = 1
+		}
+		ease := p * p
+		alpha = 1 - ease
+		slideY = ease * -8
+		c.AnimationFrame()
+	} else {
+		rem := (toastEnterDur + toastHoldDur) - elapsed
+		if rem < time.Millisecond {
+			rem = time.Millisecond
+		}
+		c.After(rem)
+	}
+
+	topInset, _, _, _ := c.SafeArea()
+	winW, _ := c.Size()
+	if winW <= 0 {
+		winW = 402
+	}
+	maxW := winW - 36
+	if maxW < 180 {
+		maxW = 180
+	}
+
+	bg := ui.RGBA(255, 255, 255, 0.96)
+	border := ui.RGBA(15, 23, 42, 0.08)
+	shadowCol := ui.RGBA(15, 23, 42, 0.14)
+	if t.Dark {
+		bg = ui.RGBA(28, 34, 48, 0.96)
+		border = ui.RGBA(255, 255, 255, 0.12)
+		shadowCol = ui.RGBA(0, 0, 0, 0.36)
+	}
+
+	msg := a.toastQueue[0]
+	ui.Overlay(c, func() {
+		ui.Column(c).Absolute().PassThrough().Left(0).Right(0).Top(topInset + 10).
+			AlignItems(ui.Center).PaddingX(18).Translate(0, slideY).Opacity(alpha).Children(func() {
+			ui.Box(c.Key("toast-banner-capsule")).PassThrough().
+				MaxWidth(maxW).
+				Padding(9, 18).
+				Radius(999).
+				Background(bg).
+				Border(1, border).
+				Shadow(0, 6, 18, 0, shadowCol).
+				Children(func() {
+					ui.Text(c, msg).
+						FontSize(13).
+						FontWeight(500).
+						TextColor(t.Text).
+						MaxLines(2).
+						TextAlign(ui.Center)
+				})
+		})
+	})
 }
 
 func (a *AppState) buildMiniAudioBar(c *ui.Context, t *ui.Theme, aboveDock, obscured bool) {
@@ -960,15 +1213,15 @@ func (a *AppState) fillGPSLocationAsync(target string) {
 				a.regRegionSheetOpen = false
 				a.resetExploreForRegionChange()
 				if cityName != "" {
-					a.pendingToast = "已定位至 " + cityName
+					a.showToast("已定位至 " + cityName)
 				}
 			} else {
 				a.jDraftGPSBusy = false
 				if err != nil {
 					if errors.Is(err, errors.ErrUnsupported) {
-						a.pendingToast = "桌面端暂不支持 GPS 定位，可手动填写观测地点"
+						a.showToast("桌面端暂不支持 GPS 定位，可手动填写观测地点")
 					} else {
-						a.pendingToast = fmt.Sprintf("定位失败: %v", err)
+						a.showToast(fmt.Sprintf("定位失败: %v", err))
 					}
 					return
 				}
@@ -982,7 +1235,7 @@ func (a *AppState) fillGPSLocationAsync(target string) {
 					a.jDraftLocation = displayLoc
 				}
 				a.hapticSuccess()
-				a.pendingToast = "已定位：" + displayLoc
+				a.showToast("已定位：" + displayLoc)
 			}
 		})
 	}()
@@ -1015,7 +1268,7 @@ func (a *AppState) ShareOrExportJournal(mode string) {
 					return
 				}
 				a.updateUI(func() {
-					a.pendingToast = fmt.Sprintf("分享失败: %v", err)
+					a.showToast(fmt.Sprintf("分享失败: %v", err))
 				})
 			}
 		}()
@@ -1035,9 +1288,9 @@ func (a *AppState) ShareOrExportJournal(mode string) {
 		err = a.store.ExportJournalCSV(dest)
 		a.updateUI(func() {
 			if err != nil {
-				a.pendingToast = fmt.Sprintf("导出失败: %v", err)
+				a.showToast(fmt.Sprintf("导出失败: %v", err))
 			} else {
-				a.pendingToast = "已导出观鸟日志至 " + filepath.Base(dest)
+				a.showToast("已导出观鸟日志至 " + filepath.Base(dest))
 			}
 		})
 	}()

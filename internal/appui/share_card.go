@@ -422,14 +422,14 @@ func (a *AppState) openRenderedShareCard(title, filePrefix, shareText string, im
 	}
 	pngBytes, err := encodeRGBAToPNG(img)
 	if err != nil {
-		a.updateUI(func() { a.pendingToast = fmt.Sprintf("生成分享图失败: %v", err) })
+		a.updateUI(func() { a.showToast(fmt.Sprintf("生成分享图失败: %v", err)) })
 		return
 	}
 	shareDir := filepath.Join(a.store.DataDir(), "shares")
 	_ = os.MkdirAll(shareDir, 0o755)
 	filePath := filepath.Join(shareDir, fmt.Sprintf("%s_%d.png", filePrefix, time.Now().Unix()))
 	if err := os.WriteFile(filePath, pngBytes, 0o644); err != nil {
-		a.updateUI(func() { a.pendingToast = fmt.Sprintf("写入分享图失败: %v", err) })
+		a.updateUI(func() { a.showToast(fmt.Sprintf("写入分享图失败: %v", err)) })
 		return
 	}
 	previewSrc, _ := ui.DecodeImage(pngBytes)
@@ -561,10 +561,10 @@ func (a *AppState) viewShareImagePreviewOverlay(c *ui.Context, t *ui.Theme) {
 							}
 							a.updateUI(func() {
 								if rerr != nil {
-									a.pendingToast = fmt.Sprintf("保存失败: %v", rerr)
+									a.showToast(fmt.Sprintf("保存失败: %v", rerr))
 								} else {
 									a.hapticSuccess()
-									a.pendingToast = "已保存分享图至 " + filepath.Base(dest)
+									a.showToast("已保存分享图至 " + filepath.Base(dest))
 								}
 							})
 						}()
@@ -596,12 +596,12 @@ func (a *AppState) viewShareImagePreviewOverlay(c *ui.Context, t *ui.Theme) {
 									if serr == nil && dest != "" {
 										if data, rerr := os.ReadFile(srcPath); rerr == nil {
 											_ = os.WriteFile(dest, data, 0o644)
-											a.updateUI(func() { a.pendingToast = "已导出图片至 " + filepath.Base(dest) })
+											a.updateUI(func() { a.showToast("已导出图片至 " + filepath.Base(dest)) })
 										}
 									}
 									return
 								}
-								a.updateUI(func() { a.pendingToast = fmt.Sprintf("分享失败: %v", err) })
+								a.updateUI(func() { a.showToast(fmt.Sprintf("分享失败: %v", err)) })
 							}
 						}()
 					}

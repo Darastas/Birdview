@@ -131,7 +131,7 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 								a.localImgCache = make(map[string]ui.ImageSource)
 								a.localImgOrder = nil
 								a.refreshStorageStats()
-								c.Toast("已清空在线媒体缓存")
+								a.showToast("已清空在线媒体缓存")
 							}
 						})
 
@@ -142,7 +142,7 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 
 					// 4. 关于
 					tactileCard(c, t).Clip().Children(func() {
-						if hapticClick(settingsRow(c, "set-row-about", "关于 Birdview", "v1.0.0", t, nil)) {
+						if hapticClick(settingsRow(c, "set-row-about", "关于 Birdview", "v1.0.1", t, nil)) {
 							a.setAboutSheetOpen = true
 						}
 					})
@@ -251,7 +251,7 @@ func (a *AppState) viewSettingsAboutSheet(c *ui.Context, t *ui.Theme) {
 				ui.Column(c).FillWidth().Padding(14, 18, 36, 18).Gap(14).Children(func() {
 					tactileCard(c, t).Padding(16).Gap(4).Children(func() {
 						ui.Text(c, "Birdview").FontSize(16).FontWeight(600)
-						ui.Text(c, "版本 v1.0.0").FontSize(13).TextColor(t.TextMuted)
+						ui.Text(c, "版本 v1.0.1").FontSize(13).TextColor(t.TextMuted)
 					})
 
 					tactileCard(c, t).Padding(16).Gap(10).Children(func() {
@@ -289,19 +289,22 @@ func (a *AppState) viewSettingsAboutSheet(c *ui.Context, t *ui.Theme) {
 
 func (a *AppState) saveKeysFromUI(c *ui.Context) {
 	if err := a.store.SaveEbirdKey(a.setEbirdKey); err != nil {
-		c.Toast(fmt.Sprintf("保存 eBird Key 失败: %v", err))
+		a.showToast(fmt.Sprintf("保存 eBird Key 失败: %v", err))
 		return
 	}
 	if err := a.store.SaveXenoKey(a.setXenoKey); err != nil {
-		c.Toast(fmt.Sprintf("保存 Xeno-canto Key 失败: %v", err))
+		a.showToast(fmt.Sprintf("保存 Xeno-canto Key 失败: %v", err))
 		return
 	}
 	a.setKeySheetOpen = false
-	if a.win != nil && len(a.chinaCodes) == 0 {
-		a.loadTaxonomyAsync(false)
+	if a.win != nil {
+		if len(a.chinaCodes) == 0 {
+			a.loadTaxonomyAsync(false)
+		}
+		a.preloadExploreAllSubTabs()
 	}
 	a.hapticSuccess()
-	c.Toast("API 密钥已保存")
+	a.showToast("API 密钥已保存")
 }
 
 func (a *AppState) saveRegionPreferenceOnly(c *ui.Context, nextRegion string) {
@@ -309,7 +312,7 @@ func (a *AppState) saveRegionPreferenceOnly(c *ui.Context, nextRegion string) {
 	cfg := a.store.Settings()
 	cfg.DefaultRegion = nextRegion
 	if err := a.store.SaveSettings(cfg); err != nil {
-		c.Toast(fmt.Sprintf("保存设置失败: %v", err))
+		a.showToast(fmt.Sprintf("保存设置失败: %v", err))
 		return
 	}
 	a.regionalRegion = nextRegion
@@ -318,8 +321,10 @@ func (a *AppState) saveRegionPreferenceOnly(c *ui.Context, nextRegion string) {
 	a.seasonalRegionLabel = regionLabelByCode(nextRegion)
 	if a.win != nil && prevRegion != nextRegion {
 		a.loadTaxonomyAsync(false)
+		a.resetExploreForRegionChange()
+		a.preloadSeasonalAndGuideThumbs()
 	}
-	c.Toast("已切换默认地区：" + a.setRegionLabel)
+	a.showToast("已切换默认地区：" + a.setRegionLabel)
 }
 
 func (a *AppState) saveThemePreferenceOnly(c *ui.Context, mode string) {

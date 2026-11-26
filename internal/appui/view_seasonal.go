@@ -80,6 +80,8 @@ func seasonalPhenologyBarStyle(ph model.SeasonalPhase, dark bool) (topCol, botCo
 	}
 }
 
+type phenMetricsKey struct{}
+
 // renderSeasonalPhenologyChart 渲染柔和无边框的 1–12 月物候胶囊韵律月历（详请页与分享图共用）。
 func renderSeasonalPhenologyChart(c *ui.Context, cal [12]model.SeasonalPhase, activeMonth int, dark, interactive bool, onSelect func(int)) {
 	trackBg := ui.Hex("#F3F6F8")
@@ -93,8 +95,29 @@ func renderSeasonalPhenologyChart(c *ui.Context, cal [12]model.SeasonalPhase, ac
 		mutedCol = ui.RGBA(255, 255, 255, 0.56)
 	}
 
+	var st *segMetrics
+	if interactive {
+		st = ui.Local(c.Root(), phenMetricsKey{}, func() segMetrics { return segMetrics{} })
+	}
+
 	ui.Box(c).FillWidth().Radius(14).Background(trackBg).Padding(10, 6, 8, 6).Children(func() {
-		ui.Row(c).FillWidth().Gap(3).AlignItems(ui.End).Children(func() {
+		trackRow := ui.Row(c.Key("phen-track")).FillWidth().Gap(3).AlignItems(ui.End)
+		rowRect := trackRow.LayoutBounds()
+		idx := max(0, min(11, activeMonth-1))
+		spotReady := interactive && st != nil && len(st.ws) == 12 && st.ws[idx] > 0 && st.hs[idx] > 0
+		trackRow.Children(func() {
+			if spotReady {
+				animX := trackRow.AnimateTo("phen-spot-x", st.xs[idx], segmentSlideAnim)
+				animW := trackRow.AnimateTo("phen-spot-w", st.ws[idx], segmentSlideAnim)
+				spot := ui.Box(c.Key("phen-spot")).Absolute().Left(animX).Top(st.ys[idx]).Width(animW).Height(st.hs[idx]).
+					Radius(10).Background(pillBg).PassThrough().ZIndex(-1)
+				if !dark {
+					spot.Shadow(0, 2, 8, 0, ui.RGBA(15, 23, 42, 0.10))
+				}
+			} else if interactive {
+				c.AnimationFrame()
+			}
+
 			for m := 1; m <= 12; m++ {
 				mm := m
 				ph := cal[mm-1]
@@ -106,7 +129,7 @@ func renderSeasonalPhenologyChart(c *ui.Context, cal [12]model.SeasonalPhase, ac
 				if interactive {
 					col.Role(ui.RoleButton).Label(fmt.Sprintf("%d月 %s", mm, ph.Label()))
 				}
-				if selected {
+				if selected && !spotReady {
 					col.Background(pillBg)
 					if !dark {
 						col.Shadow(0, 2, 8, 0, ui.RGBA(15, 23, 42, 0.10))
@@ -133,15 +156,24 @@ func renderSeasonalPhenologyChart(c *ui.Context, cal [12]model.SeasonalPhase, ac
 						numCol = textCol
 					}
 					ui.Textf(c, "%d", mm).FontSize(10.5).FontWeight(numWeight).TextColor(numCol).FontFeatures("tnum")
-
-					dotCol := ui.Transparent
-					if selected {
-						dotCol = botCol
-					}
-					ui.Box(c).Size(4, 4).Radius(2).Background(dotCol)
 				})
+				if interactive && st != nil {
+					if len(st.xs) != 12 {
+						st.xs = make([]float32, 12)
+						st.ys = make([]float32, 12)
+						st.ws = make([]float32, 12)
+						st.hs = make([]float32, 12)
+					}
+					if r := col.LayoutBounds(); rowRect.W > 0 && r.W > 0 && r.H > 0 {
+						st.xs[mm-1] = r.X - rowRect.X
+						st.ys[mm-1] = r.Y - rowRect.Y
+						st.ws[mm-1] = r.W
+						st.hs[mm-1] = r.H
+					}
+				}
 				if interactive && onSelect != nil && hapticClick(col) {
 					onSelect(mm)
+					c.AnimationFrame()
 				}
 			}
 		})
@@ -206,13 +238,13 @@ func (a *AppState) activeMemoCount() int {
 	return n
 }
 
-func (a *AppState) toggleSeasonalBirdMemo(c *ui.Context, b model.SeasonalBird, zone model.EcoZone, month int, regionName string) {
+func (a *AppState) toggleSeasonalBirdMemo(b model.SeasonalBird, zone model.EcoZone, month int, regionName string) {
 	// 如果当月已有未完成备忘则移除，否则添加新追鸟备忘
 	for _, m := range a.store.Memos() {
 		if !m.Completed && m.SpeciesCode == b.SpeciesCode && m.TargetMonth == month {
 			_ = a.store.DeleteMemo(m.ID)
 			a.hapticSelection()
-			c.Toast("已从追鸟备忘移除：" + b.ComName)
+			a.showToast("已从追鸟备忘移除：" + b.ComName)
 			return
 		}
 	}
@@ -228,11 +260,11 @@ func (a *AppState) toggleSeasonalBirdMemo(c *ui.Context, b model.SeasonalBird, z
 		Notes:       b.CardSeasonBlurb(ph, month, regionName),
 	})
 	if err != nil {
-		c.Toast(fmt.Sprintf("添加备忘失败: %v", err))
+		a.showToast(fmt.Sprintf("添加备忘失败: %v", err))
 		return
 	}
 	a.hapticSuccess()
-	c.Toast(fmt.Sprintf("已加入 %d 月追鸟备忘：%s", month, b.ComName))
+	a.showToast(fmt.Sprintf("已加入 %d 月追鸟备忘：%s", month, b.ComName))
 }
 
 func (a *AppState) openSeasonalBirdInGuide(b model.SeasonalBird) {
@@ -448,7 +480,7 @@ func (a *AppState) buildSeasonalBirdCard(c *ui.Context, t *ui.Theme, idx int, bi
 					}
 					bmBtn := circleIconBtn(c, fmt.Sprintf("sbm-%s", bird.SpeciesCode), bmLabel, bmIcon, bmBg, bmFg, 30)
 					if hapticClick(bmBtn) {
-						a.toggleSeasonalBirdMemo(c, bird, zone, a.seasonalMonth, regionName)
+						a.toggleSeasonalBirdMemo(bird, zone, a.seasonalMonth, regionName)
 					}
 				})
 
@@ -551,7 +583,7 @@ func (a *AppState) viewSeasonalDetailPage(c *ui.Context, t *ui.Theme, code strin
 							bmIc = iconBookmarkFill
 						}
 						if hapticClick(liquidGlassCircleBtnFast(c, "sd-bm-top", "加入追鸟备忘", bmIc, 40, transitioning)) {
-							a.toggleSeasonalBirdMemo(c, bird, zone, detailMonth, regionName)
+							a.toggleSeasonalBirdMemo(bird, zone, detailMonth, regionName)
 						}
 					})
 				})
@@ -607,7 +639,7 @@ func (a *AppState) viewSeasonalDetailPage(c *ui.Context, t *ui.Theme, code strin
 							ui.Text(c, memoText).FontSize(13.5).FontWeight(500).TextColor(col)
 						})
 						if hapticClick(memoBtn) {
-							a.toggleSeasonalBirdMemo(c, bird, zone, detailMonth, regionName)
+							a.toggleSeasonalBirdMemo(bird, zone, detailMonth, regionName)
 						}
 
 						calBtn := applySculptedSecondaryPillStyle(
@@ -894,8 +926,7 @@ func (a *AppState) openCalendarEvent(title, location, desc, defaultICSName strin
 		calURI := "birdview-calendar://add?" + q.Encode()
 		if err := mygo.Shell.OpenExternal(calURI); err == nil {
 			a.hapticSuccess()
-			a.pendingToast = "已打开系统日历创建观鸟日程"
-			a.invalidateUI()
+			a.showToast("已打开系统日历创建观鸟日程")
 			return
 		}
 	}
@@ -911,12 +942,12 @@ func (a *AppState) openCalendarEvent(title, location, desc, defaultICSName strin
 			return
 		}
 		if werr := os.WriteFile(dest, []byte(ics), 0o644); werr != nil {
-			a.updateUI(func() { a.pendingToast = fmt.Sprintf("保存日历文件失败: %v", werr) })
+			a.updateUI(func() { a.showToast(fmt.Sprintf("保存日历文件失败: %v", werr)) })
 			return
 		}
 		a.updateUI(func() {
 			a.hapticSuccess()
-			a.pendingToast = "已导出日历日程 " + filepath.Base(dest)
+			a.showToast("已导出日历日程 " + filepath.Base(dest))
 		})
 	}()
 }

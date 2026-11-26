@@ -99,7 +99,27 @@ func (a *AppState) EnsureExploreSubTabLoaded() {
 	}
 }
 
-// resetExploreForRegionChange 切换探索地区时立刻清空旧地区缓存与滚动位置，并使在途旧请求失效，确保界面马上进入灰色骨架卡片加载。
+// preloadExploreAllSubTabs 启动或切换地区时并发预加载全部 4 个探索子分页数据，切换即秒开。
+func (a *AppState) preloadExploreAllSubTabs() {
+	photoKey := a.exploreGeoCacheKey()
+	if !a.regPhotoBusy && (a.regPhotoLoadedKey != photoKey || a.regPhotoErr != "") {
+		a.loadExploreFieldPhotos()
+	}
+	if a.store.LoadEbirdKey() != "" {
+		obsKey := a.exploreObsCacheKey()
+		if !a.regObsBusy && (a.regObsLoadedKey != obsKey || a.regObsErr != "") {
+			a.loadExploreObservations(false)
+		}
+		if !a.regNotableBusy && (a.regNotableLoadedKey != obsKey || a.regNotableErr != "") {
+			a.loadExploreObservations(true)
+		}
+		if !a.hsBusy && (a.hsLoadedKey != photoKey || a.hsErr != "") {
+			a.loadExploreHotspots()
+		}
+	}
+}
+
+// resetExploreForRegionChange 切换探索地区时立刻清空旧地区缓存与滚动位置，并使在途旧请求失效，随后后台预加载全部子页。
 func (a *AppState) resetExploreForRegionChange() {
 	a.regPhotoSeq++
 	a.regObsSeq++
@@ -109,6 +129,7 @@ func (a *AppState) resetExploreForRegionChange() {
 	a.regObsBusy = false
 	a.regNotableBusy = false
 	a.hsBusy = false
+	a.regStatBusy = false
 	a.regPhotoErr = ""
 	a.regObsErr = ""
 	a.regNotableErr = ""
@@ -125,7 +146,7 @@ func (a *AppState) resetExploreForRegionChange() {
 	a.hsAll = nil
 	a.hsFiltered = nil
 	a.exploreScroll = [4]ui.ScrollState{}
-	a.LoadExploreData()
+	a.preloadExploreAllSubTabs()
 }
 
 // LoadExploreData 强制加载当前选中的「探索」子分页内容（用于首进、下拉刷新或手动重试）。
@@ -238,7 +259,10 @@ func (a *AppState) loadExploreObservations(notable bool) {
 		a.regObsBusy = true
 		a.regObsErr = ""
 	}
-	needStat := a.regStat == nil || a.regStatKey != geoKey
+	needStat := !a.regStatBusy && (a.regStat == nil || a.regStatKey != geoKey)
+	if needStat {
+		a.regStatBusy = true
+	}
 	a.invalidateUI()
 
 	go func() {
@@ -272,6 +296,13 @@ func (a *AppState) loadExploreObservations(notable bool) {
 		wg.Wait()
 
 		a.updateUI(func() {
+			if needStat {
+				a.regStatBusy = false
+				if statErr == nil && stat != nil {
+					a.regStat = stat
+					a.regStatKey = geoKey
+				}
+			}
 			if notable {
 				if seq != a.regNotableSeq {
 					return
@@ -298,10 +329,6 @@ func (a *AppState) loadExploreObservations(notable bool) {
 				}
 				a.regObsList = obs
 				a.regObsLoadedKey = obsKey
-			}
-			if needStat && statErr == nil && stat != nil {
-				a.regStat = stat
-				a.regStatKey = geoKey
 			}
 		})
 	}()
