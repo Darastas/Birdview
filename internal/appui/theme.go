@@ -21,6 +21,15 @@ var dockToggleAnim = ui.Animation{
 	},
 }
 
+// segmentSlideAnim 是分段切换滑块、底部导航栏激活块与物候选中高亮的弹性平移动画曲线。
+var segmentSlideAnim = ui.Animation{
+	Spring: ui.SpringOptions{
+		Duration:  280 * time.Millisecond,
+		Bounce:    0.06,
+		Precision: 0.25,
+	},
+}
+
 var (
 	opticalBlueLight = ui.Hex("#2563EB")
 	opticalCyanLight = ui.Hex("#0EA5E9")
@@ -337,19 +346,76 @@ func monochromeButton(c *ui.Context, key any, label string, primary bool, t *ui.
 
 // tactileSegmentedControl 绘制全宽圆角凹槽 + 立体浮雕滑块分段器（曲率与搜索框保持一致）。
 func tactileSegmentedControl(c *ui.Context, key string, selected *int, t *ui.Theme, labels ...string) bool {
-	strip := tactileRecessedStyle(ui.Row(c.Key(key)).FillWidth().Height(40).Padding(3).Gap(2).Role(ui.RoleTabList), t, 20)
+	strip := tactileRecessedStyle(ui.Row(c.Key(key)).FillWidth().Height(40).Padding(2).Gap(2).Role(ui.RoleTabList), t, 20)
 	return renderSegmentItems(c, strip, key, selected, 34, 17, 6, true, t, labels...)
 }
 
 // tactileCompactSegment 绘制自适应宽度的紧凑阴刻分段切换器（适配已解锁开关与排序切换）。
 func tactileCompactSegment(c *ui.Context, key string, selected *int, t *ui.Theme, labels ...string) bool {
-	strip := tactileRecessedStyle(ui.Row(c.Key(key)).Height(34).Padding(3).Gap(2).Shrink(0).Role(ui.RoleTabList), t, 17)
+	strip := tactileRecessedStyle(ui.Row(c.Key(key)).Height(34).Padding(2).Gap(2).Shrink(0).Role(ui.RoleTabList), t, 17)
 	return renderSegmentItems(c, strip, key, selected, 28, 14, 12, false, t, labels...)
+}
+
+type segMetricsKey struct{ key string }
+
+type dockMetricsKey struct{}
+
+type segMetrics struct {
+	xs []float32
+	ys []float32
+	ws []float32
+	hs []float32
+}
+
+func applySculptedSegmentThumbStyle(el ui.Element, t *ui.Theme) ui.Element {
+	if t.Dark {
+		return el.
+			LinearGradient(ui.LinearGradient{From: ui.Hex("#283042"), To: ui.Hex("#1E2433"), Angle: 180}).
+			Border(1, ui.RGBA(255, 255, 255, 0.14)).
+			InsetShadow(0, 1, 0, 0, ui.RGBA(255, 255, 255, 0.14)).
+			Shadow(0, 2, 6, 0, ui.RGBA(0, 0, 0, 0.4))
+	}
+	return el.
+		LinearGradient(ui.LinearGradient{From: ui.Hex("#FFFFFF"), To: ui.Hex("#F7F9FC"), Angle: 180}).
+		Border(1, ui.RGBA(15, 23, 42, 0.05)).
+		InsetShadow(0, 1, 0, 0, ui.RGB(255, 255, 255)).
+		Shadow(0, 1, 3, 0, ui.RGBA(15, 23, 42, 0.10)).
+		Shadow(0, 3, 8, -2, ui.RGBA(15, 23, 42, 0.08))
+}
+
+func applyDockActivePillStyle(el ui.Element, t *ui.Theme) ui.Element {
+	if t.Dark {
+		return el.Background(ui.RGBA(255, 255, 255, 0.14)).
+			InsetShadow(0, 1, 0, 0, ui.RGBA(255, 255, 255, 0.18))
+	}
+	return el.Background(ui.RGBA(255, 255, 255, 0.85)).
+		InsetShadow(0, 1, 0, 0, ui.RGB(255, 255, 255)).
+		Shadow(0, 1, 4, 0, ui.RGBA(15, 23, 42, 0.09))
 }
 
 func renderSegmentItems(c *ui.Context, strip ui.Element, key string, selected *int, itemH, itemR, padX float32, grow bool, t *ui.Theme, labels ...string) bool {
 	changed := false
+	stripRect := strip.LayoutBounds()
+	const stripBorder = float32(1)
+	st := ui.Local(c.Root(), segMetricsKey{key}, func() segMetrics { return segMetrics{} })
+
 	strip.Children(func() {
+		sel := 0
+		if len(labels) > 0 {
+			sel = max(0, min(*selected, len(labels)-1))
+		}
+		thumbReady := len(st.ws) == len(labels) && sel < len(st.ws) && st.ws[sel] > 0 && st.hs[sel] > 0
+		if thumbReady {
+			animX := strip.AnimateTo("seg-x", st.xs[sel], segmentSlideAnim)
+			animW := strip.AnimateTo("seg-w", st.ws[sel], segmentSlideAnim)
+			applySculptedSegmentThumbStyle(
+				ui.Box(c.Key(key+"-thumb")).Absolute().Left(animX).Top(st.ys[sel]).Width(animW).Height(st.hs[sel]).Radius(itemR).PassThrough().ZIndex(-1),
+				t,
+			)
+		} else if len(labels) > 0 {
+			c.AnimationFrame()
+		}
+
 		for i, lbl := range labels {
 			active := *selected == i
 			item := ui.Row(c.Key(fmt.Sprintf("%s-%d", key, i))).Height(itemH).Radius(itemR).
@@ -363,19 +429,8 @@ func renderSegmentItems(c *ui.Context, strip ui.Element, key string, selected *i
 			fg := t.TextMuted
 			weight := 400
 			if active {
-				if t.Dark {
-					item.
-						LinearGradient(ui.LinearGradient{From: ui.Hex("#283042"), To: ui.Hex("#1E2433"), Angle: 180}).
-						Border(1, ui.RGBA(255, 255, 255, 0.14)).
-						InsetShadow(0, 1, 0, 0, ui.RGBA(255, 255, 255, 0.14)).
-						Shadow(0, 2, 6, 0, ui.RGBA(0, 0, 0, 0.4))
-				} else {
-					item.
-						LinearGradient(ui.LinearGradient{From: ui.Hex("#FFFFFF"), To: ui.Hex("#F7F9FC"), Angle: 180}).
-						Border(1, ui.RGBA(15, 23, 42, 0.05)).
-						InsetShadow(0, 1, 0, 0, ui.RGB(255, 255, 255)).
-						Shadow(0, 1, 3, 0, ui.RGBA(15, 23, 42, 0.10)).
-						Shadow(0, 3, 8, -2, ui.RGBA(15, 23, 42, 0.08))
+				if !thumbReady {
+					applySculptedSegmentThumbStyle(item, t)
 				}
 				fg = t.Text
 				weight = 500
@@ -383,10 +438,23 @@ func renderSegmentItems(c *ui.Context, strip ui.Element, key string, selected *i
 			item.Children(func() {
 				ui.Text(c, lbl).FontSize(13).FontWeight(weight).TextColor(fg).SingleLine()
 			})
+			if len(st.xs) != len(labels) {
+				st.xs = make([]float32, len(labels))
+				st.ys = make([]float32, len(labels))
+				st.ws = make([]float32, len(labels))
+				st.hs = make([]float32, len(labels))
+			}
+			if r := item.LayoutBounds(); stripRect.W > 0 && r.W > 0 && r.H > 0 {
+				st.xs[i] = r.X - stripRect.X - stripBorder
+				st.ys[i] = r.Y - stripRect.Y - stripBorder
+				st.ws[i] = r.W
+				st.hs[i] = r.H
+			}
 			if item.Clicked() && !active {
 				*selected = i
 				changed = true
 				triggerHapticTap()
+				c.AnimationFrame()
 			}
 		}
 	})
@@ -420,7 +488,7 @@ func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme, obscured, hidd
 
 	changed := false
 	dock := ui.Row(c.Key("min-bottom-bar")).Absolute().Left(14).Right(14).Bottom(dockBottom).
-		Height(62).Padding(5, 5).Radius(31).
+		Height(62).Radius(31).
 		Role(ui.RoleTabList)
 	shift := dock.AnimateTo("dock-slide", targetShift, dockToggleAnim)
 	hideFrac := max(float32(0), min(float32(1), shift/max(hideDist, 1)))
@@ -428,14 +496,16 @@ func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme, obscured, hidd
 	if hidden && shift > 24 {
 		dock.PassThrough()
 	}
-	if obscured || hideFrac > 0.05 {
+	hasBorder := obscured || hideFrac > 0.05
+	if hasBorder {
+		dock.Padding(4, 4)
 		if t.Dark {
 			dock.Background(ui.Hex("#161B26")).Border(1, ui.RGBA(255, 255, 255, 0.10))
 		} else {
 			dock.Background(ui.Hex("#FFFFFF")).Border(1, ui.RGBA(15, 23, 42, 0.08))
 		}
 	} else {
-		dock.Material(floatingBarGlass(t.Dark))
+		dock.Padding(5, 5).Material(floatingBarGlass(t.Dark))
 	}
 	if t.Dark {
 		dock.
@@ -447,7 +517,26 @@ func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme, obscured, hidd
 			Shadow(0, 2, 6, 0, ui.RGBA(15, 23, 42, 0.08))
 	}
 
+	st := ui.Local(c.Root(), dockMetricsKey{}, func() segMetrics { return segMetrics{} })
+	dockRect := dock.LayoutBounds()
 	dock.Children(func() {
+		sel := max(0, min(*selected, len(items)-1))
+		borderW := float32(0)
+		if hasBorder {
+			borderW = 1
+		}
+		pillReady := len(st.ws) == len(items) && sel < len(st.ws) && st.ws[sel] > 0 && st.hs[sel] > 0
+		if pillReady {
+			animX := dock.AnimateTo("dock-tab-x", st.xs[sel], segmentSlideAnim)
+			animW := dock.AnimateTo("dock-tab-w", st.ws[sel], segmentSlideAnim)
+			applyDockActivePillStyle(
+				ui.Box(c.Key("dock-active-pill")).Absolute().Left(animX).Top(st.ys[sel]).Width(animW).Height(st.hs[sel]).Radius(26).PassThrough().ZIndex(-1),
+				t,
+			)
+		} else {
+			c.AnimationFrame()
+		}
+
 		for i, it := range items {
 			active := *selected == i
 			fg := secondaryTextColor(t)
@@ -458,22 +547,30 @@ func floatingGlassDock(c *ui.Context, selected *int, t *ui.Theme, obscured, hidd
 			if active {
 				fg = t.Text
 				weight = 500
-				if t.Dark {
-					tab.Background(ui.RGBA(255, 255, 255, 0.14)).
-						InsetShadow(0, 1, 0, 0, ui.RGBA(255, 255, 255, 0.18))
-				} else {
-					tab.Background(ui.RGBA(255, 255, 255, 0.85)).
-						InsetShadow(0, 1, 0, 0, ui.RGB(255, 255, 255)).
-						Shadow(0, 1, 4, 0, ui.RGBA(15, 23, 42, 0.09))
+				if !pillReady {
+					applyDockActivePillStyle(tab, t)
 				}
 			}
 			tab.Children(func() {
 				ui.Icon(c, it.icon).FontSize(19).TextColor(fg)
 				ui.Text(c, it.label).FontSize(10.5).FontWeight(weight).TextColor(fg).NoWrap()
 			})
+			if len(st.xs) != len(items) {
+				st.xs = make([]float32, len(items))
+				st.ys = make([]float32, len(items))
+				st.ws = make([]float32, len(items))
+				st.hs = make([]float32, len(items))
+			}
+			if r := tab.LayoutBounds(); dockRect.W > 0 && r.W > 0 && r.H > 0 {
+				st.xs[i] = r.X - dockRect.X - borderW
+				st.ys[i] = r.Y - dockRect.Y - borderW
+				st.ws[i] = r.W
+				st.hs[i] = r.H
+			}
 			if tab.Clicked() && !active {
 				*selected = i
 				changed = true
+				c.AnimationFrame()
 			}
 		}
 	})

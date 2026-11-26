@@ -2,14 +2,14 @@
   <img src="resources/icon.png" width="112" alt="Birdview 应用图标" />
 </p>
 
-<h1 align="center">Birdview v1.0.0</h1>
+<h1 align="center">Birdview v1.0.1</h1>
 
 <p align="center">
   轻盈纯粹的掌上观鸟图鉴、时令物候指南与野外记录手账
 </p>
 
 <p align="center">
-  <a href="https://github.com/Darastas/Birdview/releases/latest"><strong>前往下载 Android APK (v1.0.0) →</strong></a>
+  <a href="https://github.com/Darastas/Birdview/releases/latest"><strong>前往下载 Android APK (v1.0.1) →</strong></a>
 </p>
 
 ---
@@ -43,7 +43,7 @@
 ### 3. 周边探索 · 现场实拍与近期目击
 - **四大动态板块**：集成免 Key 即可浏览的 **现场实拍**（来自周边观鸟者当次上传的真实野外照片与现场录音），以及 **近期目击**、**珍稀记录** 与 **观鸟热点**。
 - **GPS 自动定位与省市直达**：支持手机 GPS 一键定位并自动识别所在城市，或直接搜索切换全国省区与全球经纬度/地区码。
-- **智能会话缓存**：切换子页面保留已加载内容与浏览位置，告别每次切换都要重新转圈等待。
+- **启动全量预加载与会话保活**：进入应用即自动在后台并发预加载图鉴名录、指南与探索四大子页（区域统计智能去重），切换子页面直接呈现内容并保留浏览位置。
 
 ### 4. 观鸟日志与手账分享 · 私密存于本机
 - **图文与现场录音齐备**：记录鸟种时支持智能中文/拉丁名联想，直接拍照或从相册选图，并可按住麦克风实时录制高清晰 **野外鸟鸣 WAV 音频**。
@@ -51,14 +51,15 @@
 - **隐私安全**：你的个人观鸟日志、照片与录音全程仅存储在手机本地，API Key 由系统安全凭据库加密保管。
 
 ### 5. 细腻轻盈的移动端手感
-- **滚动自动隐现的光学悬浮底栏**：向下浏览长列表时底部导航栏丝滑收起，上滑即刻柔和浮现，把更多视野留给飞羽与文字。
+- **弹簧滑块与滚动自动隐现底栏**：分段切换器、底部 5 标签导航栏与物候月历均配备顺滑弹簧滑块平移动画；向下浏览长列表时底栏平滑收起，上滑即刻柔和浮现。
+- **轻盈顺序胶囊提示**：操作反馈采用顶部居中单行自适应胶囊，连续触发多条提示时按序排队逐条弹出，告别叠行遮挡。
 - **主题与全域触感反馈**：支持 **跟随系统 / 浅色 / 深色** 实时切换，全应用按钮与分段控件配以温和精准的按键震动（支持在「设置」中随时一键关闭）。
 
 ---
 
 ## 快速开始
 
-1. 前往 [**GitHub Releases**](https://github.com/Darastas/Birdview/releases/latest) 下载最新版 **`birdview-1.0.0.apk`** 并安装到 Android 手机（支持 Android 8.0 及以上）。
+1. 前往 [**GitHub Releases**](https://github.com/Darastas/Birdview/releases/latest) 下载最新版 **`birdview-1.0.1.apk`** 并安装到 Android 手机（支持 Android 8.0 及以上）。
 2. 安装后无需登录或填写复杂配置，即可直接使用 **观鸟指南**、**现场实拍** 与 **本地观鸟日志**。
 3. 如需解锁 **近期目击、珍稀记录、观鸟热点与完整地区物种名录**，可前往「设置 → 数据源密钥」免费申请并填入个人 **eBird API Key**（可选补充 **Xeno-canto API v3 Key** 扩展专业鸟鸣曲库）。
 
@@ -76,6 +77,6 @@ go test -v ./internal/...
 # 桌面端手机视口预览运行
 go run .
 
-# 构建 Android Release APK / AAB（输出 build/android/birdview-1.0.0.apk）
+# 构建 Android Release APK / AAB（输出 build/android/birdview-1.0.1.apk）
 go tool mygo build -platform android
 ```

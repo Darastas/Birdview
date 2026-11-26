@@ -1,6 +1,8 @@
 package appui
 
 import (
+	"fmt"
+	"image"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -1338,8 +1340,8 @@ func TestSettingsHapticsSwitchAndPersistence(t *testing.T) {
 	}
 	advanceUI(tt, 150*time.Millisecond)
 
-	if !tt.HasText("v1.0.0") || !tt.HasText("按键震动") {
-		t.Fatalf("expected v1.0.0 and 按键震动 row in settings, texts=%q", tt.Texts())
+	if !tt.HasText("v1.0.1") || !tt.HasText("按键震动") {
+		t.Fatalf("expected v1.0.1 and 按键震动 row in settings, texts=%q", tt.Texts())
 	}
 	if !mygo.Haptics.Enabled() || app.store.Settings().HapticsDisabled {
 		t.Fatal("expected haptics enabled by default")
@@ -1489,5 +1491,334 @@ func TestMultiDetentSheetBottomSafeAreaClearance(t *testing.T) {
 	}
 	if famRect.Y+famRect.H > 844-28 {
 		t.Fatalf("expected last family %q above 28dp bottom safe area (maxY<=816), got rect=%+v", lastFam, famRect)
+	}
+}
+
+func TestSequentialToastQueueSingleVisibleAndFIFO(t *testing.T) {
+	app := newTestAppState(t)
+	tt := ui.NewTester(app.View, 402, 844)
+	advanceUI(tt, 64*time.Millisecond)
+
+	app.showToast("第一条提示")
+	app.showToast("第二条提示")
+	tt.Frame()
+
+	if !tt.HasText("第一条提示") {
+		t.Fatalf("expected first toast visible immediately, texts=%q", tt.Texts())
+	}
+	if tt.HasText("第二条提示") {
+		t.Fatalf("expected second toast queued rather than stacked on two rows, texts=%q", tt.Texts())
+	}
+
+	// 单个提示总时长 1730ms，推进 1900ms 后应切换为第二条提示
+	advanceUI(tt, 1900*time.Millisecond)
+	if tt.HasText("第一条提示") {
+		t.Fatalf("expected first toast dismissed after duration, texts=%q", tt.Texts())
+	}
+	if !tt.HasText("第二条提示") {
+		t.Fatalf("expected second toast displayed in FIFO order, texts=%q", tt.Texts())
+	}
+
+	// 再推进 1900ms 后应完整消失
+	advanceUI(tt, 1900*time.Millisecond)
+	if tt.HasText("第二条提示") {
+		t.Fatalf("expected second toast dismissed cleanly, texts=%q", tt.Texts())
+	}
+}
+
+func countDarkPixels(img *image.RGBA, r ui.Rect) int {
+	if img == nil || r.W <= 0 || r.H <= 0 {
+		return 0
+	}
+	b := img.Bounds()
+	scale := float32(b.Dx()) / 402.0
+	if scale <= 0 {
+		scale = 1
+	}
+	x0 := max(b.Min.X, int(r.X*scale))
+	y0 := max(b.Min.Y, int(r.Y*scale))
+	x1 := min(b.Max.X, int((r.X+r.W)*scale))
+	y1 := min(b.Max.Y, int((r.Y+r.H)*scale))
+	count := 0
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			px := img.RGBAAt(x, y)
+			if px.A > 0 && (int(px.R)+int(px.G)+int(px.B))/3 < 130 {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func assertWhitePillAlignedToSegment(t *testing.T, img *image.RGBA, label string, segRect ui.Rect) {
+	t.Helper()
+	b := img.Bounds()
+	scale := float32(b.Dx()) / 402.0
+	if scale <= 0 {
+		scale = 1
+	}
+	isWhitePill := func(x, y int) bool {
+		if x < b.Min.X || x >= b.Max.X || y < b.Min.Y || y >= b.Max.Y {
+			return false
+		}
+		px := img.RGBAAt(x, y)
+		return px.A > 0 && px.R >= 246 && px.G >= 246 && px.B >= 246
+	}
+	isRecessedTrack := func(x, y int) bool {
+		if x < b.Min.X || x >= b.Max.X || y < b.Min.Y || y >= b.Max.Y {
+			return false
+		}
+		px := img.RGBAAt(x, y)
+		// 凹槽灰底 #E7ECF3 及内阴影/描边像素均明显低于 R=240
+		return px.A > 0 && px.R <= 240
+	}
+
+	cx := int((segRect.X + segRect.W/2) * scale)
+	cy := int((segRect.Y + segRect.H/2) * scale)
+
+	// 1. 沿高于文字字形的水平清扫线（中心上方 12dp）定位白色滑块左右边界，验证水平居中
+	yClear := int((segRect.Y + segRect.H/2 - 12) * scale)
+	if !isWhitePill(cx, yClear) {
+		t.Fatalf("expected bright white pill at clear line y=%d above %q (cx=%d, rect=%+v)", yClear, label, cx, segRect)
+	}
+	pillL := cx
+	for pillL > b.Min.X && isWhitePill(pillL-1, yClear) {
+		pillL--
+	}
+	pillR := cx
+	for pillR+1 < b.Max.X && isWhitePill(pillR+1, yClear) {
+		pillR++
+	}
+	pillCenterX := float32(pillL+pillR) / 2.0
+	wantCenterX := (segRect.X + segRect.W/2) * scale
+	if diff := pillCenterX - wantCenterX; diff < -2*scale || diff > 2*scale {
+		t.Fatalf("expected horizontal pill center aligned with %q within 2dp, pill=[%d..%d](%.1f) vs textCenter=%.1f",
+			label, pillL, pillR, pillCenterX, wantCenterX)
+	}
+
+	// 2. 在胶囊左翼无字形处（pillL + 6*scale）垂直扫描白色滑块上下边界与凹槽灰底对称间隙
+	probeX := pillL + int(6*scale)
+	if probeX >= cx-int(18*scale) {
+		probeX = pillL + 4
+	}
+	if !isWhitePill(probeX, cy) {
+		t.Fatalf("expected glyph-free probe column x=%d y=%d inside white pill for %q (pill=[%d..%d])", probeX, cy, label, pillL, pillR)
+	}
+	pillTop := cy
+	for pillTop > b.Min.Y && isWhitePill(probeX, pillTop-1) {
+		pillTop--
+	}
+	pillBot := cy
+	for pillBot+1 < b.Max.Y && isWhitePill(probeX, pillBot+1) {
+		pillBot++
+	}
+	pillCenterY := float32(pillTop+pillBot) / 2.0
+	wantCenterY := (segRect.Y + segRect.H/2) * scale
+	if diff := pillCenterY - wantCenterY; diff < -1.5*scale || diff > 1.5*scale {
+		t.Fatalf("expected vertical pill center aligned with %q within 1.5dp, pillY=[%d..%d](%.1f) vs textCenterY=%.1f",
+			label, pillTop, pillBot, pillCenterY, wantCenterY)
+	}
+
+	// 验证胶囊上下外侧（距中心 ±18.5dp 处的上下凹槽内边距）均呈现 #E7ECF3 灰底而非被滑块顶出/下沉压边
+	yTopGroove := int(wantCenterY - 18.5*scale)
+	yBotGroove := int(wantCenterY + 18.5*scale)
+	if !isRecessedTrack(probeX, yTopGroove) || !isRecessedTrack(probeX, yBotGroove) {
+		t.Fatalf("expected symmetric top/bottom recessed groove at y=%d and y=%d around %q (topPx=%v botPx=%v pillY=[%d..%d])",
+			yTopGroove, yBotGroove, label, img.RGBAAt(probeX, yTopGroove), img.RGBAAt(probeX, yBotGroove), pillTop, pillBot)
+	}
+}
+
+func TestSlidingSegmentAndDockThumbAnimation(t *testing.T) {
+	app := newTestAppState(t)
+	tt := ui.NewTester(app.View, 402, 844)
+	advanceUI(tt, 64*time.Millisecond)
+
+	// 0. 检查「探索 -> 现场实拍|近期目击|珍稀记录|观鸟热点」滑块左右/上下完全居中对齐、无下沉偏移，且滑动后也保持对齐
+	if err := tt.Click("探索"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 64*time.Millisecond)
+	advanceUI(tt, 360*time.Millisecond)
+	expRect, ok := tt.Find("现场实拍")
+	if !ok {
+		t.Fatalf("expected explore segment 现场实拍 visible, texts=%q", tt.Texts())
+	}
+	expImg := tt.Image()
+	if darkPx := countDarkPixels(expImg, expRect); darkPx <= 10 {
+		t.Fatalf("expected active segment 现场实拍 rendered crisp above thumb (darkPx=%d, rect=%+v)", darkPx, expRect)
+	}
+	assertWhitePillAlignedToSegment(t, expImg, "现场实拍", expRect)
+
+	if err := tt.Click("近期目击"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 64*time.Millisecond)
+	advanceUI(tt, 360*time.Millisecond)
+	recRect, ok := tt.Find("近期目击")
+	if !ok {
+		t.Fatalf("expected explore segment 近期目击 visible, texts=%q", tt.Texts())
+	}
+	recImg := tt.Image()
+	if darkPx := countDarkPixels(recImg, recRect); darkPx <= 10 {
+		t.Fatalf("expected active segment 近期目击 rendered crisp above thumb (darkPx=%d, rect=%+v)", darkPx, recRect)
+	}
+	assertWhitePillAlignedToSegment(t, recImg, "近期目击", recRect)
+
+	// 1. 底部导航栏滑块从「图鉴」滑向「指南」，并验证滑块在底层、文字与图标清晰可见未被遮挡
+	if err := tt.Click("指南"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 64*time.Millisecond)
+	advanceUI(tt, 360*time.Millisecond)
+	if app.router.Path() != "/seasonal" {
+		t.Fatalf("expected route /seasonal, got %q", app.router.Path())
+	}
+	dockRect, ok := tt.Find("指南")
+	if !ok {
+		t.Fatalf("expected dock label 指南 visible, texts=%q", tt.Texts())
+	}
+	if darkPx := countDarkPixels(tt.Image(), dockRect); darkPx <= 10 {
+		t.Fatalf("expected active dock tab 指南 rendered crisp above dock-active-pill (darkPx=%d, rect=%+v)", darkPx, dockRect)
+	}
+
+	// 2. 指南分段器从默认选中项滑向「马上到」，验证文字处于滑块上方且清晰可见
+	if err := tt.Click("马上到"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 64*time.Millisecond)
+	advanceUI(tt, 360*time.Millisecond)
+	if !tt.HasText("即将抵达") && !tt.HasText("马上到") {
+		t.Fatalf("expected seasonal arriving-soon state visible, texts=%q", tt.Texts())
+	}
+	segRect, ok := tt.Find("马上到")
+	if !ok || segRect.W <= 0 {
+		t.Fatalf("expected 马上到 segment intact after spring slide, ok=%v rect=%+v", ok, segRect)
+	}
+	if darkPx := countDarkPixels(tt.Image(), segRect); darkPx <= 10 {
+		t.Fatalf("expected active segment 马上到 text rendered crisp above thumb (darkPx=%d, rect=%+v)", darkPx, segRect)
+	}
+
+	// 3. 进入当季鸟类详情页，验证「全年物候月历」白色高亮滑块不遮挡月份数字与色条
+	if err := tt.Click("当季"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 360*time.Millisecond)
+	inSeason := api.SeasonalBirdsByRegionAndMonth("CN-11", 11)[model.PhaseInSeason]
+	if len(inSeason) == 0 {
+		t.Fatal("expected in-season birds for CN-11 month 11")
+	}
+	firstBird := inSeason[0]
+	if err := tt.Click(firstBird.ComName + " 时令详情"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 500*time.Millisecond)
+
+	m11Str := fmt.Sprintf("%d", app.seasonalDetailMonth)
+	m11Rect, ok := tt.Find(m11Str)
+	if !ok {
+		t.Fatalf("expected phenology month %q visible in detail page, texts=%q", m11Str, tt.Texts())
+	}
+	if darkPx := countDarkPixels(tt.Image(), m11Rect); darkPx <= 8 {
+		t.Fatalf("expected active phenology month %q text rendered crisp above phen-spot (darkPx=%d, rect=%+v)", m11Str, darkPx, m11Rect)
+	}
+
+	m10Before, ok := tt.Find("10")
+	if !ok {
+		t.Fatalf("expected month 10 visible in phenology chart, texts=%q", tt.Texts())
+	}
+	tt.ClickAt(m10Before.X+m10Before.W/2, m10Before.Y+m10Before.H/2)
+	advanceUI(tt, 400*time.Millisecond)
+	m10Rect, ok := tt.Find("10")
+	if !ok || app.seasonalDetailMonth != 10 {
+		t.Fatalf("expected switched to month 10 in phenology chart, ok=%v month=%d", ok, app.seasonalDetailMonth)
+	}
+	if darkPx := countDarkPixels(tt.Image(), m10Rect); darkPx <= 8 {
+		t.Fatalf("expected selected month 10 rendered crisp above phen-spot (darkPx=%d, rect=%+v)", darkPx, m10Rect)
+	}
+
+	tt.MobileBack()
+	advanceUI(tt, 500*time.Millisecond)
+
+	// 4. 切到设置页并将外观主题分段器滑向「深色」
+	if err := tt.Click("设置"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 64*time.Millisecond)
+	advanceUI(tt, 360*time.Millisecond)
+	if err := tt.Click("深色"); err != nil {
+		t.Fatal(err)
+	}
+	advanceUI(tt, 64*time.Millisecond)
+	advanceUI(tt, 360*time.Millisecond)
+	if app.setThemeMode != "深色" || app.store.Settings().ThemeMode != "dark" {
+		t.Fatalf("expected dark theme mode after segment slide, label=%q mode=%q", app.setThemeMode, app.store.Settings().ThemeMode)
+	}
+	if img := tt.Image(); img.Bounds().Dx() != 402 || img.Bounds().Dy() != 844 {
+		t.Fatalf("unexpected render bounds after animations: %v", img.Bounds())
+	}
+}
+
+func TestStartupPreloadAllExploreSubTabs(t *testing.T) {
+	var photoCalls, recentCalls, notableCalls, hotspotCalls, statCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/observations" && r.URL.Query().Get("lat") != "":
+			photoCalls.Add(1)
+			_, _ = w.Write([]byte(`{"total_results":1,"results":[{"id":1,"observed_on":"2026-11-26","place_guess":"广东","taxon":{"name":"Platalea minor","preferred_common_name":"黑脸琵鹭"},"user":{"login":"tester"},"photos":[{"url":"https://example.com/square.jpg"}]}]}`))
+		case strings.Contains(r.URL.Path, "/recent/notable"):
+			notableCalls.Add(1)
+			_, _ = w.Write([]byte(`[{"speciesCode":"blkspo1","comName":"黑脸琵鹭","sciName":"Platalea minor","locName":"深圳湾","obsDt":"2026-11-26 08:00","howMany":3,"subId":"S1"}]`))
+		case strings.HasSuffix(r.URL.Path, "/recent"):
+			recentCalls.Add(1)
+			_, _ = w.Write([]byte(`[{"speciesCode":"mallar3","comName":"绿头鸭","sciName":"Anas platyrhynchos","locName":"公园湖面","obsDt":"2026-11-26 09:00","howMany":5,"subId":"S2"}]`))
+		case strings.Contains(r.URL.Path, "/ref/hotspot/"):
+			hotspotCalls.Add(1)
+			_, _ = w.Write([]byte(`[{"locId":"L1","locName":"深圳福田红树林","numSpeciesAllTime":220}]`))
+		case strings.Contains(r.URL.Path, "/product/stats/"):
+			statCalls.Add(1)
+			_, _ = w.Write([]byte(`{"numChecklists":12,"numContributors":8,"numSpecies":64}`))
+		default:
+			_, _ = w.Write([]byte(`{"results":[]}`))
+		}
+	}))
+	defer srv.Close()
+
+	app := newTestAppState(t)
+	app.client.EBirdBaseURL = srv.URL
+	app.client.INatBaseURL = srv.URL
+	app.client.WikiBaseURL = srv.URL
+	app.client.XenoBaseURL = srv.URL
+	if err := app.store.SaveEbirdKey("test-ebird-key"); err != nil {
+		t.Fatal(err)
+	}
+	app.setEbirdKey = "test-ebird-key"
+
+	tt := ui.NewTester(app.View, 402, 844)
+	advanceUI(tt, 32*time.Millisecond)
+
+	// 在仍停留在「图鉴」页、尚未点击「探索」时触发启动全量预加载
+	app.PreloadAllOnStartup()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		advanceUI(tt, 30*time.Millisecond)
+		if photoCalls.Load() >= 1 && recentCalls.Load() >= 1 && notableCalls.Load() >= 1 && hotspotCalls.Load() >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(60 * time.Millisecond)
+	advanceUI(tt, 30*time.Millisecond)
+
+	if app.router.Path() != "/guide" {
+		t.Fatalf("expected user still on /guide before tapping explore, got %q", app.router.Path())
+	}
+	if photoCalls.Load() != 1 || recentCalls.Load() != 1 || notableCalls.Load() != 1 || hotspotCalls.Load() != 1 {
+		t.Fatalf("expected all 4 explore subtabs preloaded once before visiting explore, got photo=%d recent=%d notable=%d hotspot=%d",
+			photoCalls.Load(), recentCalls.Load(), notableCalls.Load(), hotspotCalls.Load())
+	}
+	if statCalls.Load() > 1 {
+		t.Fatalf("expected deduplicated FetchRegionStats (<=1 call), got %d", statCalls.Load())
 	}
 }

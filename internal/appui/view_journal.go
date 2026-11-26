@@ -1070,9 +1070,9 @@ func (a *AppState) saveJournalDraft(c *ui.Context) {
 		a.refreshStorageStats()
 		a.hapticSuccess()
 		if newlyUnlocked {
-			c.Toast(fmt.Sprintf("已解锁新鸟种：%s（%d 种）", saved.ComName, len(a.store.UnlockedBirds())))
+			a.showToast(fmt.Sprintf("已解锁新鸟种：%s（%d 种）", saved.ComName, len(a.store.UnlockedBirds())))
 		} else {
-			c.Toast("已保存观鸟日志")
+			a.showToast("已保存观鸟日志")
 		}
 	} else {
 		_, err := a.store.UpdateJournalEntry(entry)
@@ -1084,7 +1084,7 @@ func (a *AppState) saveJournalDraft(c *ui.Context) {
 		a.refreshJournalList()
 		a.refreshStorageStats()
 		a.hapticSuccess()
-		c.Toast("已更新观鸟日志")
+		a.showToast("已更新观鸟日志")
 	}
 }
 
@@ -1099,6 +1099,6 @@ func (a *AppState) viewJournalDeleteDialog(c *ui.Context) {
 		if strings.HasPrefix(a.router.Path(), "/journal/") {
 			a.goBack()
 		}
-		c.Toast("已删除观鸟日志")
+		a.showToast("已删除观鸟日志")
 	}
 }

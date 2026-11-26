@@ -216,6 +216,9 @@ func (a *AppState) SetTaxonomy(taxa []model.Taxon, chinaSet, regionSet map[strin
 
 	a.applyGuideFilter()
 	a.rebuildJournalSpeciesOptions()
+	if a.win != nil {
+		a.preloadGuideTopThumbs()
+	}
 }
 
 // OpenSpeciesInGuide 跳转至图鉴页并推入指定物种的详情屏（不破坏当前 Tab 历史栈）。
