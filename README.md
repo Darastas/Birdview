@@ -2,14 +2,14 @@
   <img src="resources/icon.png" width="112" alt="Birdview 应用图标" />
 </p>
 
-<h1 align="center">Birdview v1.0.1</h1>
+<h1 align="center">Birdview v1.0.2</h1>
 
 <p align="center">
   轻盈纯粹的掌上观鸟图鉴、时令物候指南与野外记录手账
 </p>
 
 <p align="center">
-  <a href="https://github.com/Darastas/Birdview/releases/latest"><strong>前往下载 Android APK (v1.0.1) →</strong></a>
+  <a href="https://github.com/Darastas/Birdview/releases/latest"><strong>前往下载 Android APK (v1.0.2) →</strong></a>
 </p>
 
 ---
@@ -59,7 +59,7 @@
 
 ## 快速开始
 
-1. 前往 [**GitHub Releases**](https://github.com/Darastas/Birdview/releases/latest) 下载最新版 **`birdview-1.0.1.apk`** 并安装到 Android 手机（支持 Android 8.0 及以上）。
+1. 前往 [**GitHub Releases**](https://github.com/Darastas/Birdview/releases/latest) 下载最新版 **`birdview-1.0.2.apk`** 并安装到 Android 手机（支持 Android 8.0 及以上）。
 2. 安装后无需登录或填写复杂配置，即可直接使用 **观鸟指南**、**现场实拍** 与 **本地观鸟日志**。
 3. 如需解锁 **近期目击、珍稀记录、观鸟热点与完整地区物种名录**，可前往「设置 → 数据源密钥」免费申请并填入个人 **eBird API Key**（可选补充 **Xeno-canto API v3 Key** 扩展专业鸟鸣曲库）。
 
@@ -77,6 +77,6 @@ go test -v ./internal/...
 # 桌面端手机视口预览运行
 go run .
 
-# 构建 Android Release APK / AAB（输出 build/android/birdview-1.0.1.apk）
+# 构建 Android Release APK / AAB（输出 build/android/birdview-1.0.2.apk）
 go tool mygo build -platform android
 ```

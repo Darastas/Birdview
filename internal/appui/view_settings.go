@@ -142,7 +142,7 @@ func (a *AppState) viewSettingsHome(c *ui.Context, t *ui.Theme) {
 
 					// 4. 关于
 					tactileCard(c, t).Clip().Children(func() {
-						if hapticClick(settingsRow(c, "set-row-about", "关于 Birdview", "v1.0.1", t, nil)) {
+						if hapticClick(settingsRow(c, "set-row-about", "关于 Birdview", "v1.0.2", t, nil)) {
 							a.setAboutSheetOpen = true
 						}
 					})
@@ -251,7 +251,7 @@ func (a *AppState) viewSettingsAboutSheet(c *ui.Context, t *ui.Theme) {
 				ui.Column(c).FillWidth().Padding(14, 18, 36, 18).Gap(14).Children(func() {
 					tactileCard(c, t).Padding(16).Gap(4).Children(func() {
 						ui.Text(c, "Birdview").FontSize(16).FontWeight(600)
-						ui.Text(c, "版本 v1.0.1").FontSize(13).TextColor(t.TextMuted)
+						ui.Text(c, "版本 v1.0.2").FontSize(13).TextColor(t.TextMuted)
 					})
 
 					tactileCard(c, t).Padding(16).Gap(10).Children(func() {
