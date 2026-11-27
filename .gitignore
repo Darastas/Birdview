@@ -1,6 +1,7 @@
 /build/
 /dist/
 /.mygo/
+/docs/promo/
 mygo_windows_*.syso
 Somethingshouldknow.md
 *.exe

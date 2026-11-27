@@ -1340,8 +1340,8 @@ func TestSettingsHapticsSwitchAndPersistence(t *testing.T) {
 	}
 	advanceUI(tt, 150*time.Millisecond)
 
-	if !tt.HasText("v1.0.1") || !tt.HasText("按键震动") {
-		t.Fatalf("expected v1.0.1 and 按键震动 row in settings, texts=%q", tt.Texts())
+	if !tt.HasText("v1.0.2") || !tt.HasText("按键震动") {
+		t.Fatalf("expected v1.0.2 and 按键震动 row in settings, texts=%q", tt.Texts())
 	}
 	if !mygo.Haptics.Enabled() || app.store.Settings().HapticsDisabled {
 		t.Fatal("expected haptics enabled by default")

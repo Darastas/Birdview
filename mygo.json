@@ -1,7 +1,7 @@
 {
   "name": "Birdview",
   "identifier": "com.darastas.birdview",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "out": "build",
   "icon": "resources/icon.png",
   "android": {
